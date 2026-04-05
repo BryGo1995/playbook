@@ -79,7 +79,8 @@ def test_skip_already_active_issue(MockGH, MockPopen, config, state_dir):
     orch = Orchestrator(config, state_dir=state_dir)
     orch.state.add_agent(pid=11111, issue="owner/repo#42", repo="owner/repo", agent_type="coding", timeout_minutes=60, attempt=1)
 
-    orch.run()
+    with patch.object(orch, "_is_process_alive", return_value=True):
+        orch.run()
 
     MockPopen.assert_not_called()
 
@@ -101,7 +102,8 @@ def test_respects_concurrency_limit(MockGH, MockPopen, config, state_dir):
     orch = Orchestrator(config, state_dir=state_dir)
     orch.state.add_agent(pid=11111, issue="owner/repo#99", repo="owner/repo", agent_type="coding", timeout_minutes=60, attempt=1)
 
-    orch.run()
+    with patch.object(orch, "_is_process_alive", return_value=True):
+        orch.run()
 
     MockPopen.assert_not_called()
 

@@ -37,13 +37,14 @@ class Orchestrator:
             self._process_review_issues(repo)
 
     def _check_running_agents(self):
-        """Check running agents for timeouts. Dead agents are cleaned up by
-        calling _handle_completion, which logs and removes them from state."""
+        """Check PIDs, handle timeouts and completions."""
         for agent in list(self.state.agents):
             pid = agent["pid"]
-            alive = self._is_process_alive(pid)
-            if alive and self._is_timed_out(agent):
-                self._handle_timeout(agent)
+            if self._is_process_alive(pid):
+                if self._is_timed_out(agent):
+                    self._handle_timeout(agent)
+            else:
+                self._handle_completion(agent)
 
     def _is_process_alive(self, pid: int) -> bool:
         try:
