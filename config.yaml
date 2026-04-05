@@ -1,5 +1,8 @@
+# Agent Orchestrator Configuration
+# Before running: update repos list and set GITHUB_TOKEN + SLACK_WEBHOOK_URL env vars
+
 repos:
-  - owner/example-repo
+  - owner/example-repo  # Replace with your actual repos
 
 concurrency:
   max_coding: 2
