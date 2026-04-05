@@ -143,3 +143,37 @@ def test_max_retries_labels_blocked(MockGH, MockPopen, config, state_dir):
 
     mock_gh.swap_label.assert_called_with("owner/repo", 42, "ai-ready", "ai-blocked")
     MockPopen.assert_not_called()
+
+
+@patch("orchestrator.subprocess.Popen")
+@patch("orchestrator.GitHubClient")
+def test_full_cycle_ready_to_dispatch(MockGH, MockPopen, config, state_dir):
+    """Simulates a full orchestrator run: finds a ready issue, dispatches, records state."""
+    mock_gh = MockGH.return_value
+
+    # Issue 10 is ai-ready, Issue 20 is ai-review-needed
+    ready_issue = _mock_issue(10, "Add feature", "## Acceptance Criteria\n- [ ] Done", ["ai-ready"])
+    review_issue = _mock_issue(20, "Review feature", "Body", ["ai-review-needed"])
+
+    def side_effect(repo, label):
+        if label == "ai-ready":
+            return [ready_issue]
+        if label == "ai-review-needed":
+            return [review_issue]
+        return []
+
+    mock_gh.fetch_issues_by_label.side_effect = side_effect
+    mock_gh.get_attempt_count.return_value = 0
+
+    mock_proc_coding = MagicMock()
+    mock_proc_coding.pid = 1001
+    mock_proc_review = MagicMock()
+    mock_proc_review.pid = 1002
+    MockPopen.side_effect = [mock_proc_coding, mock_proc_review]
+
+    orch = Orchestrator(config, state_dir=state_dir)
+    orch.run()
+
+    assert len(orch.state.agents) == 2
+    types = {a["type"] for a in orch.state.agents}
+    assert types == {"coding", "review"}
