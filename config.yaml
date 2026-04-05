@@ -1,0 +1,28 @@
+repos:
+  - owner/example-repo
+
+concurrency:
+  max_coding: 2
+  max_testing: 1
+  max_review: 1
+
+timeouts:
+  coding_minutes: 60
+  testing_minutes: 30
+  review_minutes: 30
+
+guardrails:
+  max_files_changed: 10
+  max_retry_cycles: 3
+
+slack:
+  webhook_url: "${SLACK_WEBHOOK_URL}"
+
+labels:
+  ready: "ai-ready"
+  in_progress: "ai-in-progress"
+  testing: "ai-testing"
+  review_needed: "ai-review-needed"
+  pr_ready: "ai-pr-ready"
+  blocked: "ai-blocked"
+  error: "ai-error"

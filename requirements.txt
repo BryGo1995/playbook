@@ -1,0 +1,4 @@
+PyGithub==2.6.1
+requests>=2.32.0
+PyYAML>=6.0
+pytest>=8.0
