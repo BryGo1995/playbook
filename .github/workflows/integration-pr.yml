@@ -49,13 +49,13 @@ jobs:
           COMMITS=$(git log origin/${{ inputs.base_branch }}..HEAD --pretty=format:"%h %s")
 
           # Extract unique issue numbers from Closes/Fixes/Resolves patterns
-          ISSUE_NUMS=$(echo "$COMMITS" | grep -oiE '(closes|fixes|resolves)\s+#[0-9]+' | grep -oE '[0-9]+' | sort -un)
+          ISSUE_NUMS=$(echo "$COMMITS" | grep -oiE '(closes|fixes|resolves)\s+#[0-9]+' | grep -oE '[0-9]+' | sort -un || true)
 
           # Also match bare #N in squash-merge subjects (e.g., "feat: add auth (#42)")
-          BARE_NUMS=$(echo "$COMMITS" | grep -oE '#[0-9]+' | grep -oE '[0-9]+' | sort -un)
+          BARE_NUMS=$(echo "$COMMITS" | grep -oE '#[0-9]+' | grep -oE '[0-9]+' | sort -un || true)
 
           # Combine and deduplicate
-          ALL_NUMS=$(echo -e "${ISSUE_NUMS}\n${BARE_NUMS}" | sort -un | grep -v '^$')
+          ALL_NUMS=$(echo -e "${ISSUE_NUMS}\n${BARE_NUMS}" | sort -un | grep -v '^$' || true)
 
           if [ -z "$ALL_NUMS" ]; then
             echo "found=false" >> "$GITHUB_OUTPUT"
