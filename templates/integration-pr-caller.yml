@@ -8,6 +8,10 @@ on:
   push:
     branches: [ai/dev]  # Change if your integration branch has a different name
 
+permissions:
+  contents: read
+  pull-requests: write
+
 jobs:
   integration-pr:
     uses: BryGo1995/playbook/.github/workflows/integration-pr.yml@main
