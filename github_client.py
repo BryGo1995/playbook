@@ -202,6 +202,16 @@ class GitHubClient:
         owner, repo = repo_name.split("/")
         self._rest_post(f"/repos/{owner}/{repo}/issues/{issue_number}/comments", {"body": body})
 
+    def close_issue(self, repo_name: str, issue_number: int):
+        """Close an issue."""
+        owner, repo = repo_name.split("/")
+        requests.patch(
+            f"https://api.github.com/repos/{owner}/{repo}/issues/{issue_number}",
+            json={"state": "closed", "state_reason": "completed"},
+            headers=self.headers,
+            timeout=30,
+        )
+
     def get_attempt_count(self, repo_name: str, issue_number: int) -> int:
         """Count orchestrator attempt comments on an issue."""
         owner, repo = repo_name.split("/")
