@@ -51,44 +51,27 @@ def parse_since(since_str: str) -> timedelta:
     return timedelta(minutes=value)
 
 
-def categorize_issues(issues: list, labels: dict) -> dict:
-    """Categorize issues by their current label state."""
-    categories = {
-        "merged": [],
-        "pr_ready": [],
-        "review_needed": [],
-        "testing": [],
-        "in_progress": [],
-        "blocked": [],
-        "error": [],
+def categorize_issues(issues_by_status: dict[str, list[dict]], statuses: dict) -> dict:
+    """Categorize issues from status queries into summary categories."""
+    return {
+        "complete": issues_by_status.get(statuses["complete"], []),
+        "done": issues_by_status.get(statuses["done"], []),
+        "in_progress": issues_by_status.get(statuses["in_progress"], []),
+        "testing": issues_by_status.get(statuses["testing"], []),
+        "review": issues_by_status.get(statuses["review"], []),
+        "blocked": issues_by_status.get(statuses["blocked"], []),
+        "error": issues_by_status.get(statuses["error"], []),
     }
-    label_to_category = {
-        labels["merged"]: "merged",
-        labels["pr_ready"]: "pr_ready",
-        labels["review_needed"]: "review_needed",
-        labels["testing"]: "testing",
-        labels["in_progress"]: "in_progress",
-        labels["blocked"]: "blocked",
-        labels["error"]: "error",
-    }
-    for issue in issues:
-        issue_labels = {lbl.name for lbl in issue.labels}
-        for label_name, category in label_to_category.items():
-            if label_name in issue_labels:
-                categories[category].append(issue)
-                break
-    return categories
 
 
-def group_by_theme(issues: list) -> list[str]:
-    """Group issues into short theme descriptions by common title prefixes/keywords."""
+def group_by_theme(issues: list[dict]) -> list[str]:
+    """Group issues into short theme descriptions by common title prefixes."""
     if len(issues) <= 3:
-        return [f"#{i.number} {i.title}" for i in issues]
+        return [f"#{i['number']} {i['title']}" for i in issues]
 
-    # Group by first word in title (e.g., "Fix", "Add", "Update")
     groups = {}
     for issue in issues:
-        words = issue.title.strip().split()
+        words = issue["title"].strip().split()
         key = words[0] if words else "Other"
         if key not in groups:
             groups[key] = []
@@ -97,9 +80,9 @@ def group_by_theme(issues: list) -> list[str]:
     lines = []
     for theme, group_issues in groups.items():
         if len(group_issues) == 1:
-            lines.append(f"#{group_issues[0].number} {group_issues[0].title}")
+            lines.append(f"#{group_issues[0]['number']} {group_issues[0]['title']}")
         else:
-            numbers = ", ".join(f"#{i.number}" for i in group_issues)
+            numbers = ", ".join(f"#{i['number']}" for i in group_issues)
             lines.append(f"{theme}: {numbers}")
     return lines
 
@@ -109,21 +92,19 @@ def format_summary(repo: str, categories: dict, since: datetime, now: datetime, 
     since_str = since.strftime("%b %d %I:%M%p").replace(" 0", " ")
     now_str = now.strftime("%b %d %I:%M%p").replace(" 0", " ")
 
-    merged = categories["merged"]
+    merged = categories["complete"] + categories["done"]
     in_progress = categories["in_progress"]
     testing = categories["testing"]
-    review = categories["review_needed"]
-    pr_ready = categories["pr_ready"]
+    review = categories["review"]
     blocked = categories["blocked"]
     errors = categories["error"]
 
-    total_active = len(in_progress) + len(testing) + len(review) + len(pr_ready)
+    total_active = len(in_progress) + len(testing) + len(review)
 
     lines = []
     lines.append(f":clipboard: *Summary: {repo}* ({since_str} → {now_str})")
     lines.append("━" * 35)
 
-    # Status counts line
     counts = []
     if merged:
         counts.append(f":white_check_mark: {len(merged)} merged")
@@ -142,36 +123,30 @@ def format_summary(repo: str, categories: dict, since: datetime, now: datetime, 
 
     lines.append("")
 
-    # Merged details
     if merged:
         lines.append("*Merged:*")
         for item in group_by_theme(merged):
             lines.append(f"  • {item}")
 
-    # In progress breakdown
-    active_issues = in_progress + testing + review + pr_ready
+    active_issues = in_progress + testing + review
     if active_issues:
         lines.append("*Active:*")
         for issue in in_progress:
-            lines.append(f"  • #{issue.number} {issue.title} — coding")
+            lines.append(f"  • #{issue['number']} {issue['title']} — coding")
         for issue in testing:
-            lines.append(f"  • #{issue.number} {issue.title} — testing")
+            lines.append(f"  • #{issue['number']} {issue['title']} — testing")
         for issue in review:
-            lines.append(f"  • #{issue.number} {issue.title} — in review")
-        for issue in pr_ready:
-            lines.append(f"  • #{issue.number} {issue.title} — PR ready")
+            lines.append(f"  • #{issue['number']} {issue['title']} — in review")
 
-    # Blocked
     if blocked:
         lines.append("*Blocked:*")
         for issue in blocked:
-            lines.append(f"  • #{issue.number} {issue.title}")
+            lines.append(f"  • #{issue['number']} {issue['title']}")
 
-    # Errors
     if errors:
         lines.append("*Errors:*")
         for issue in errors:
-            lines.append(f"  • #{issue.number} {issue.title}")
+            lines.append(f"  • #{issue['number']} {issue['title']}")
 
     lines.append("")
     lines.append(f"<https://github.com/{repo}/compare/main...{integration_branch}|View {integration_branch} → main diff>")
@@ -186,32 +161,36 @@ def generate_summary(config: dict, since: datetime | None = None):
         since = load_last_run()
 
     gh = GitHubClient()
+    gh.load_project_metadata(
+        owner=config["project"]["owner"],
+        project_number=config["project"]["number"],
+        status_field_id=config["project"]["status_field_id"],
+    )
     slack = SlackNotifier(config["slack"].get("webhook_url"))
-    labels = config["labels"]
+    statuses = config["statuses"]
     integration_branch = config.get("branches", {}).get("integration", "ai/dev")
 
-    all_ai_labels = list(labels.values())
+    active_statuses = [
+        statuses["complete"], statuses["done"],
+        statuses["in_progress"], statuses["testing"], statuses["review"],
+        statuses["blocked"], statuses["error"],
+    ]
+    issues_by_status = {}
+    for status_name in active_statuses:
+        issues = gh.fetch_issues_by_status(status_name)
+        if issues:
+            issues_by_status[status_name] = issues
 
-    for repo in config["repos"]:
-        logger.info(f"Generating summary for {repo} since {since.isoformat()}")
+    if not issues_by_status:
+        logger.info("No agent-tracked issues found")
+        save_last_run(now)
+        return
 
-        # Fetch all issues that have any ai-* label (both open and closed for merged)
-        all_issues = []
-        seen = set()
-        for label in all_ai_labels:
-            for issue in gh.fetch_issues_by_label(repo, label):
-                if issue.number not in seen:
-                    seen.add(issue.number)
-                    all_issues.append(issue)
-
-        if not all_issues:
-            logger.info(f"No agent-tracked issues for {repo}")
-            continue
-
-        categories = categorize_issues(all_issues, labels)
-        message = format_summary(repo, categories, since, now, integration_branch)
-        slack.send(message)
-        logger.info(f"Summary posted for {repo}")
+    categories = categorize_issues(issues_by_status, statuses)
+    repo = config["repos"][0]
+    message = format_summary(repo, categories, since, now, integration_branch)
+    slack.send(message)
+    logger.info(f"Summary posted for {repo}")
 
     save_last_run(now)
 

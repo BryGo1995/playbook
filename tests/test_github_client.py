@@ -1,89 +1,112 @@
+# tests/test_github_client.py
 import pytest
 from unittest.mock import MagicMock, patch
 from github_client import GitHubClient
 
 
 @pytest.fixture
-def mock_github():
-    with patch("github_client.Github") as MockGithub:
-        mock_instance = MockGithub.return_value
-        yield mock_instance
+def client():
+    """Create a GitHubClient with mocked HTTP."""
+    with patch("github_client.requests") as mock_requests:
+        c = GitHubClient.__new__(GitHubClient)
+        c.token = "fake-token"
+        c.headers = {"Authorization": "Bearer fake-token", "Content-Type": "application/json"}
+        c._project_id = "PVT_test123"
+        c._status_field_id = "PVTSSF_test123"
+        c._status_option_ids = {
+            "ai-ready": "opt_ready",
+            "ai-in-progress": "opt_inprogress",
+            "ai-testing": "opt_testing",
+            "ai-review": "opt_review",
+            "ai-complete": "opt_complete",
+            "ai-blocked": "opt_blocked",
+            "ai-error": "opt_error",
+        }
+        c._mock_requests = mock_requests
+        yield c
 
 
-def _make_mock_issue(number, title, body, label_names):
-    issue = MagicMock()
-    issue.number = number
-    issue.title = title
-    issue.body = body
-    labels = []
-    for name in label_names:
-        label = MagicMock()
-        label.name = name
-        labels.append(label)
-    issue.labels = labels
-    issue.repository = MagicMock()
-    issue.repository.full_name = "owner/repo"
-    return issue
+def test_get_status_option_id(client):
+    assert client.get_status_option_id("ai-ready") == "opt_ready"
+    assert client.get_status_option_id("ai-blocked") == "opt_blocked"
 
 
-def test_fetch_issues_by_label(mock_github):
-    mock_repo = MagicMock()
-    mock_github.get_repo.return_value = mock_repo
-    mock_issue = _make_mock_issue(42, "Fix bug", "Body text", ["ai-ready"])
-    mock_repo.get_issues.return_value = [mock_issue]
-
-    client = GitHubClient.__new__(GitHubClient)
-    client.gh = mock_github
-    issues = client.fetch_issues_by_label("owner/repo", "ai-ready")
-
-    assert len(issues) == 1
-    assert issues[0].number == 42
-    mock_repo.get_issues.assert_called_once_with(labels=["ai-ready"], state="open")
+def test_get_status_option_id_unknown(client):
+    with pytest.raises(ValueError, match="Unknown status"):
+        client.get_status_option_id("nonexistent")
 
 
-def test_swap_label(mock_github):
-    mock_repo = MagicMock()
-    mock_github.get_repo.return_value = mock_repo
-    mock_issue = MagicMock()
-    mock_repo.get_issue.return_value = mock_issue
+def test_update_status(client):
+    mock_resp = MagicMock()
+    mock_resp.json.return_value = {"data": {"updateProjectV2ItemFieldValue": {"projectV2Item": {"id": "item1"}}}}
+    mock_resp.raise_for_status = MagicMock()
+    client._mock_requests.post.return_value = mock_resp
 
-    client = GitHubClient.__new__(GitHubClient)
-    client.gh = mock_github
-    client.swap_label("owner/repo", 42, old_label="ai-ready", new_label="ai-in-progress")
+    client.update_status("item_123", "ai-in-progress")
 
-    mock_issue.remove_from_labels.assert_called_once_with("ai-ready")
-    mock_issue.add_to_labels.assert_called_once_with("ai-in-progress")
-
-
-def test_add_comment(mock_github):
-    mock_repo = MagicMock()
-    mock_github.get_repo.return_value = mock_repo
-    mock_issue = MagicMock()
-    mock_repo.get_issue.return_value = mock_issue
-
-    client = GitHubClient.__new__(GitHubClient)
-    client.gh = mock_github
-    client.add_comment("owner/repo", 42, "Agent blocked: ambiguous requirements")
-
-    mock_issue.create_comment.assert_called_once_with("Agent blocked: ambiguous requirements")
+    client._mock_requests.post.assert_called_once()
+    call_args = client._mock_requests.post.call_args
+    payload = call_args[1]["json"] if "json" in call_args[1] else call_args[0][1]
+    assert "opt_inprogress" in str(payload)
 
 
-def test_get_issue_attempt_count(mock_github):
-    mock_repo = MagicMock()
-    mock_github.get_repo.return_value = mock_repo
-    mock_issue = MagicMock()
-    mock_repo.get_issue.return_value = mock_issue
+def test_add_comment(client):
+    mock_resp = MagicMock()
+    mock_resp.json.return_value = {"id": 1}
+    mock_resp.raise_for_status = MagicMock()
+    client._mock_requests.post.return_value = mock_resp
 
-    comment1 = MagicMock()
-    comment1.body = "[agent-orchestrator] Attempt 1 completed"
-    comment2 = MagicMock()
-    comment2.body = "[agent-orchestrator] Attempt 2 completed"
-    comment3 = MagicMock()
-    comment3.body = "Some human comment"
-    mock_issue.get_comments.return_value = [comment1, comment2, comment3]
+    client.add_comment("owner/repo", 42, "Test comment")
 
-    client = GitHubClient.__new__(GitHubClient)
-    client.gh = mock_github
+    client._mock_requests.post.assert_called_once()
+    call_args = client._mock_requests.post.call_args
+    assert "/repos/owner/repo/issues/42/comments" in call_args[0][0]
+    assert call_args[1]["json"]["body"] == "Test comment"
+
+
+def test_get_attempt_count(client):
+    mock_resp = MagicMock()
+    mock_resp.json.return_value = [
+        {"body": "[agent-orchestrator] Attempt 1 completed (coding agent)."},
+        {"body": "[agent-orchestrator] Attempt 2 completed (coding agent)."},
+        {"body": "Some human comment"},
+    ]
+    mock_resp.raise_for_status = MagicMock()
+    client._mock_requests.get.return_value = mock_resp
+
     count = client.get_attempt_count("owner/repo", 42)
-
     assert count == 2
+
+
+def test_merge_pr_success(client):
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    client._mock_requests.put.return_value = mock_resp
+
+    assert client.merge_pr("owner/repo", 15) is True
+
+
+def test_merge_pr_failure(client):
+    mock_resp = MagicMock()
+    mock_resp.status_code = 405
+    client._mock_requests.put.return_value = mock_resp
+
+    assert client.merge_pr("owner/repo", 15) is False
+
+
+def test_find_pr_for_branch(client):
+    mock_resp = MagicMock()
+    mock_resp.json.return_value = [{"number": 15}]
+    mock_resp.raise_for_status = MagicMock()
+    client._mock_requests.get.return_value = mock_resp
+
+    assert client.find_pr_for_branch("owner/repo", "ai/issue-42") == 15
+
+
+def test_find_pr_for_branch_none(client):
+    mock_resp = MagicMock()
+    mock_resp.json.return_value = []
+    mock_resp.raise_for_status = MagicMock()
+    client._mock_requests.get.return_value = mock_resp
+
+    assert client.find_pr_for_branch("owner/repo", "ai/issue-99") is None

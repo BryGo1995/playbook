@@ -1,8 +1,13 @@
-# Agent Orchestrator Configuration
-# Before running: update repos list and set GITHUB_TOKEN + SLACK_WEBHOOK_URL env vars
+# Playbook — Agent Orchestrator Configuration
+# Before running: update repos/project settings and set GITHUB_TOKEN env var
 
 repos:
-  - owner/example-repo  # Replace with your actual repos
+  - BryGo1995/paint-ballas-auto
+
+project:
+  owner: "BryGo1995"
+  number: 9
+  status_field_id: "PVTSSF_lAHOAmiy_s4BTvqizhA8ggw"
 
 concurrency:
   max_coding: 2
@@ -19,17 +24,18 @@ guardrails:
   max_retry_cycles: 3
 
 branches:
-  integration: "ai/dev"  # Agents branch from and merge into this, not main
+  integration: "ai/dev"
 
 slack:
   webhook_url: "${SLACK_WEBHOOK_URL}"
 
-labels:
+statuses:
+  backlog: "Backlog"
   ready: "ai-ready"
   in_progress: "ai-in-progress"
   testing: "ai-testing"
-  review_needed: "ai-review-needed"
-  pr_ready: "ai-pr-ready"
-  merged: "ai-merged"
+  review: "ai-review"
+  complete: "ai-complete"
+  done: "Done"
   blocked: "ai-blocked"
   error: "ai-error"
