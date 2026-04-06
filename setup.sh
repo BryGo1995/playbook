@@ -25,12 +25,20 @@ if [ -z "${SLACK_WEBHOOK_URL:-}" ]; then
     echo "  export SLACK_WEBHOOK_URL=https://hooks.slack.com/services/..."
 fi
 
-# Show cron entry to add
+# Show cron entries to add
 echo ""
-echo "Add this to your crontab (crontab -e):"
+echo "Add these to your crontab (crontab -e):"
 echo ""
 echo "GITHUB_TOKEN=\$GITHUB_TOKEN"
 echo "SLACK_WEBHOOK_URL=\$SLACK_WEBHOOK_URL"
+echo ""
+echo "# Orchestrator: dispatch agents every 10 minutes"
 echo "*/10 * * * * cd $SCRIPT_DIR && python3 orchestrator.py >> /var/log/agent-orchestrator.log 2>&1"
+echo ""
+echo "# Morning summary: 8am"
+echo "0 8 * * * cd $SCRIPT_DIR && python3 summary.py >> /var/log/agent-orchestrator.log 2>&1"
+echo ""
+echo "# Evening summary: 8pm"
+echo "0 20 * * * cd $SCRIPT_DIR && python3 summary.py >> /var/log/agent-orchestrator.log 2>&1"
 echo ""
 echo "Setup complete."
