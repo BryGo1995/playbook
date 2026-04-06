@@ -109,8 +109,9 @@ class Orchestrator:
                 success = self.gh.merge_pr(issue["repo"], pr_number)
                 if success:
                     self.gh.update_status(issue["project_item_id"], self.statuses["done"])
+                    self.gh.close_issue(issue["repo"], issue["number"])
                     self.gh.add_comment(issue["repo"], issue["number"],
-                        f"[agent-orchestrator] PR #{pr_number} auto-merged into {self.config['branches']['integration']}.")
+                        f"[agent-orchestrator] PR #{pr_number} auto-merged into {self.config['branches']['integration']}. Issue closed.")
                     self.slack.notify_pr_ready(issue_key, pr_number)
                 else:
                     logger.warning(f"Merge failed for PR #{pr_number} ({issue_key})")
