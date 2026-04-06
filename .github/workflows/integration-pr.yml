@@ -1,0 +1,144 @@
+name: Integration PR
+
+on:
+  workflow_call:
+    inputs:
+      integration_branch:
+        description: "Source branch for the integration PR"
+        required: false
+        type: string
+        default: "ai/dev"
+      base_branch:
+        description: "Target branch for the integration PR"
+        required: false
+        type: string
+        default: "main"
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  integration-pr:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ inputs.integration_branch }}
+
+      - name: Check if integration branch is ahead of base
+        id: check-ahead
+        run: |
+          git fetch origin ${{ inputs.base_branch }}
+          AHEAD=$(git rev-list --count origin/${{ inputs.base_branch }}..HEAD)
+          echo "ahead=$AHEAD" >> "$GITHUB_OUTPUT"
+          if [ "$AHEAD" -eq 0 ]; then
+            echo "No commits ahead of ${{ inputs.base_branch }}. Nothing to do."
+          fi
+
+      - name: Extract issue references
+        if: steps.check-ahead.outputs.ahead != '0'
+        id: extract-refs
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # Get all commit messages between base and integration branch
+          COMMITS=$(git log origin/${{ inputs.base_branch }}..HEAD --pretty=format:"%h %s")
+
+          # Extract unique issue numbers from Closes/Fixes/Resolves patterns
+          ISSUE_NUMS=$(echo "$COMMITS" | grep -oiE '(closes|fixes|resolves)\s+#[0-9]+' | grep -oE '[0-9]+' | sort -un)
+
+          # Also match bare #N in squash-merge subjects (e.g., "feat: add auth (#42)")
+          BARE_NUMS=$(echo "$COMMITS" | grep -oE '#[0-9]+' | grep -oE '[0-9]+' | sort -un)
+
+          # Combine and deduplicate
+          ALL_NUMS=$(echo -e "${ISSUE_NUMS}\n${BARE_NUMS}" | sort -un | grep -v '^$')
+
+          if [ -z "$ALL_NUMS" ]; then
+            echo "found=false" >> "$GITHUB_OUTPUT"
+            echo "No issue references found in commits."
+          else
+            echo "found=true" >> "$GITHUB_OUTPUT"
+
+            # Build closes lines with issue titles
+            CLOSES_LINES=""
+            for NUM in $ALL_NUMS; do
+              TITLE=$(gh issue view "$NUM" --json title --jq '.title' 2>/dev/null || echo "")
+              if [ -n "$TITLE" ]; then
+                CLOSES_LINES="${CLOSES_LINES}- Closes #${NUM} -- ${TITLE}\n"
+              else
+                CLOSES_LINES="${CLOSES_LINES}- Closes #${NUM}\n"
+              fi
+            done
+            echo "closes_lines<<CLOSES_EOF" >> "$GITHUB_OUTPUT"
+            echo -e "$CLOSES_LINES" >> "$GITHUB_OUTPUT"
+            echo "CLOSES_EOF" >> "$GITHUB_OUTPUT"
+          fi
+
+          # Save commit log for PR body
+          echo "commits<<COMMITS_EOF" >> "$GITHUB_OUTPUT"
+          echo "$COMMITS" >> "$GITHUB_OUTPUT"
+          echo "COMMITS_EOF" >> "$GITHUB_OUTPUT"
+
+      - name: Build PR body
+        if: steps.check-ahead.outputs.ahead != '0'
+        id: build-body
+        run: |
+          INTEGRATION="${{ inputs.integration_branch }}"
+          BASE="${{ inputs.base_branch }}"
+
+          {
+            echo "body<<BODY_EOF"
+            echo "## Merge \`${INTEGRATION}\` -> \`${BASE}\`"
+            echo ""
+            if [ "${{ steps.extract-refs.outputs.found }}" = "true" ]; then
+              echo "### Completed Issues"
+              echo ""
+              echo -e "${{ steps.extract-refs.outputs.closes_lines }}"
+            else
+              echo "_No issue references found in commits._"
+              echo ""
+            fi
+            echo "### Commits"
+            echo ""
+            echo '${{ steps.extract-refs.outputs.commits }}' | while IFS= read -r line; do
+              [ -n "$line" ] && echo "- $line"
+            done
+            echo ""
+            echo "---"
+            echo "*Auto-maintained by [integration-pr](https://github.com/BryGo1995/agent-orchestrator) workflow*"
+            echo "BODY_EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Create or update PR
+        if: steps.check-ahead.outputs.ahead != '0'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          INTEGRATION="${{ inputs.integration_branch }}"
+          BASE="${{ inputs.base_branch }}"
+          TITLE="Merge ${INTEGRATION} -> ${BASE}"
+          BODY=$(cat <<'BODY_EOF'
+          ${{ steps.build-body.outputs.body }}
+          BODY_EOF
+          )
+
+          # Check for existing open PR
+          EXISTING_PR=$(gh pr list --head "$INTEGRATION" --base "$BASE" --state open --json number --jq '.[0].number // empty')
+
+          if [ -z "$EXISTING_PR" ]; then
+            echo "Creating new PR: $TITLE"
+            gh pr create --head "$INTEGRATION" --base "$BASE" --title "$TITLE" --body "$BODY"
+          else
+            echo "Updating existing PR #${EXISTING_PR}"
+            # Only update if body changed
+            CURRENT_BODY=$(gh pr view "$EXISTING_PR" --json body --jq '.body')
+            if [ "$CURRENT_BODY" != "$BODY" ]; then
+              gh pr edit "$EXISTING_PR" --body "$BODY"
+              echo "PR #${EXISTING_PR} body updated."
+            else
+              echo "PR #${EXISTING_PR} body unchanged. Skipping."
+            fi
+          fi
