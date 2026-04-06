@@ -150,6 +150,7 @@ For each repo in your config:
 2. **Create the labels:** `ai-ready`, `ai-in-progress`, `ai-testing`, `ai-review-needed`, `ai-pr-ready`, `ai-merged`, `ai-blocked`, `ai-error`
 3. **Set up GitHub Projects** automation rules to map labels to KanBan columns
 4. **Add agent instructions** to the repo's `CLAUDE.md` (project standards, test commands, etc.)
+5. **Set up the Integration PR workflow** — Copy `templates/integration-pr-caller.yml` to `.github/workflows/integration-pr.yml` in the target repo. This auto-creates a persistent `ai/dev -> main` PR whenever agents merge work into `ai/dev`. Edit the branch names in the file if your integration branch differs. No secrets required.
 
 ### Cron
 
@@ -187,8 +188,9 @@ From anywhere (GitHub mobile, desktop, Projects board):
 ### Morning Review
 
 1. Check Slack for the overnight summary and any blocked/error alerts
-2. Review `ai/dev → main` diff on GitHub
-3. Merge to `main` if everything looks good
+2. Open the persistent `ai/dev -> main` PR on GitHub — it lists all completed issues and commits
+3. Review the diff, then merge using a **regular merge commit** (not squash) to keep branches in sync
+4. A new integration PR will be created automatically when the next batch of work lands on `ai/dev`
 
 ### Manual Summary
 
@@ -217,6 +219,28 @@ python3 summary.py --since 12h    # last 12 hours
 - **Scope limits** — max 10 files changed per coding agent
 - **Draft PRs only** — agents never merge to `main`
 - **Tool restrictions** — review agent is read-only, testing agent can only write test files
+
+## Integration PR Workflow
+
+When agents merge work into `ai/dev`, a GitHub Action automatically creates (or updates) a PR targeting `main`. The PR body lists:
+
+- All `Closes #N` references extracted from commit history (so merging auto-closes the issues)
+- A commit log of everything included
+
+### How It Works
+
+1. Agent merges feature PR into `ai/dev`
+2. Push triggers the integration PR workflow
+3. Workflow scans `git log main..ai/dev` for issue references
+4. Creates a new PR or updates the existing one
+
+The PR stays open and accumulates work. Merge it when you're ready — all referenced issues close automatically.
+
+### Setup for New Repos
+
+Copy `templates/integration-pr-caller.yml` to `.github/workflows/integration-pr.yml` in the target repo. Edit branch names if needed. No secrets required.
+
+> **Important:** Always merge the integration PR with a regular merge commit (not squash). Squash-merging causes `ai/dev` and `main` to diverge in history, leading to ghost conflicts on future PRs.
 
 ## Tests
 
