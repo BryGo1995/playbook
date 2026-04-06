@@ -1,0 +1,16 @@
+# Copy this file to .github/workflows/integration-pr.yml in your target repo.
+# Requires: BryGo1995/agent-orchestrator to be public (or same org with workflow sharing).
+# No secrets needed — uses the default GITHUB_TOKEN.
+
+name: Integration PR
+
+on:
+  push:
+    branches: [ai/dev]  # Change if your integration branch has a different name
+
+jobs:
+  integration-pr:
+    uses: BryGo1995/agent-orchestrator/.github/workflows/integration-pr.yml@main
+    with:
+      integration_branch: ai/dev   # Must match the branch above
+      base_branch: main
