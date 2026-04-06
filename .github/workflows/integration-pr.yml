@@ -116,27 +116,24 @@ jobs:
         if: steps.check-ahead.outputs.ahead != '0'
         env:
           GH_TOKEN: ${{ github.token }}
+          PR_BODY: ${{ steps.build-body.outputs.body }}
         run: |
           INTEGRATION="${{ inputs.integration_branch }}"
           BASE="${{ inputs.base_branch }}"
           TITLE="Merge ${INTEGRATION} -> ${BASE}"
-          BODY=$(cat <<'BODY_EOF'
-          ${{ steps.build-body.outputs.body }}
-          BODY_EOF
-          )
 
           # Check for existing open PR
           EXISTING_PR=$(gh pr list --head "$INTEGRATION" --base "$BASE" --state open --json number --jq '.[0].number // empty')
 
           if [ -z "$EXISTING_PR" ]; then
             echo "Creating new PR: $TITLE"
-            gh pr create --head "$INTEGRATION" --base "$BASE" --title "$TITLE" --body "$BODY"
+            gh pr create --head "$INTEGRATION" --base "$BASE" --title "$TITLE" --body "$PR_BODY"
           else
             echo "Updating existing PR #${EXISTING_PR}"
             # Only update if body changed
             CURRENT_BODY=$(gh pr view "$EXISTING_PR" --json body --jq '.body')
-            if [ "$CURRENT_BODY" != "$BODY" ]; then
-              gh pr edit "$EXISTING_PR" --body "$BODY"
+            if [ "$CURRENT_BODY" != "$PR_BODY" ]; then
+              gh pr edit "$EXISTING_PR" --body "$PR_BODY"
               echo "PR #${EXISTING_PR} body updated."
             else
               echo "PR #${EXISTING_PR} body unchanged. Skipping."
