@@ -18,6 +18,9 @@ guardrails:
   max_files_changed: 10
   max_retry_cycles: 3
 
+branches:
+  integration: "ai/dev"  # Agents branch from and merge into this, not main
+
 slack:
   webhook_url: "${SLACK_WEBHOOK_URL}"
 
@@ -27,5 +30,6 @@ labels:
   testing: "ai-testing"
   review_needed: "ai-review-needed"
   pr_ready: "ai-pr-ready"
+  merged: "ai-merged"
   blocked: "ai-blocked"
   error: "ai-error"

@@ -12,6 +12,7 @@ def config():
         "concurrency": {"max_coding": 2, "max_testing": 1, "max_review": 1},
         "timeouts": {"coding_minutes": 60, "testing_minutes": 30, "review_minutes": 30},
         "guardrails": {"max_files_changed": 10, "max_retry_cycles": 3},
+        "branches": {"integration": "ai/dev"},
         "slack": {"webhook_url": None},
         "labels": {
             "ready": "ai-ready",
@@ -19,6 +20,7 @@ def config():
             "testing": "ai-testing",
             "review_needed": "ai-review-needed",
             "pr_ready": "ai-pr-ready",
+            "merged": "ai-merged",
             "blocked": "ai-blocked",
             "error": "ai-error",
         },
@@ -177,3 +179,48 @@ def test_full_cycle_ready_to_dispatch(MockGH, MockPopen, config, state_dir):
     assert len(orch.state.agents) == 2
     types = {a["type"] for a in orch.state.agents}
     assert types == {"coding", "review"}
+
+
+@patch("orchestrator.subprocess.Popen")
+@patch("orchestrator.GitHubClient")
+def test_auto_merge_pr_ready(MockGH, MockPopen, config, state_dir):
+    """When an issue is ai-pr-ready, orchestrator auto-merges the PR."""
+    mock_gh = MockGH.return_value
+    pr_ready_issue = _mock_issue(42, "Fix bug", "Body", ["ai-pr-ready"])
+
+    def side_effect(repo, label):
+        if label == "ai-pr-ready":
+            return [pr_ready_issue]
+        return []
+
+    mock_gh.fetch_issues_by_label.side_effect = side_effect
+    mock_gh.find_pr_for_branch.return_value = 15
+    mock_gh.merge_pr.return_value = True
+
+    orch = Orchestrator(config, state_dir=state_dir)
+    orch.run()
+
+    mock_gh.merge_pr.assert_called_once_with("owner/repo", 15)
+    mock_gh.swap_label.assert_called_with("owner/repo", 42, "ai-pr-ready", "ai-merged")
+
+
+@patch("orchestrator.subprocess.Popen")
+@patch("orchestrator.GitHubClient")
+def test_auto_merge_conflict_labels_blocked(MockGH, MockPopen, config, state_dir):
+    """When merge fails, issue is labeled ai-blocked."""
+    mock_gh = MockGH.return_value
+    pr_ready_issue = _mock_issue(42, "Fix bug", "Body", ["ai-pr-ready"])
+
+    def side_effect(repo, label):
+        if label == "ai-pr-ready":
+            return [pr_ready_issue]
+        return []
+
+    mock_gh.fetch_issues_by_label.side_effect = side_effect
+    mock_gh.find_pr_for_branch.return_value = 15
+    mock_gh.merge_pr.return_value = False
+
+    orch = Orchestrator(config, state_dir=state_dir)
+    orch.run()
+
+    mock_gh.swap_label.assert_called_with("owner/repo", 42, "ai-pr-ready", "ai-blocked")

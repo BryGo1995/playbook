@@ -26,7 +26,7 @@ A lightweight Python orchestrator that dispatches Claude Code headless agents to
 GitHub Issue labels drive the entire workflow. GitHub Projects automation rules map labels to KanBan columns automatically.
 
 ```
-ai-ready → ai-in-progress → ai-testing → ai-review-needed → ai-pr-ready
+ai-ready → ai-in-progress → ai-testing → ai-review-needed → ai-pr-ready → ai-merged
               ↑                                |
               └────────────────────────────────┘  (review rejects → back to coding)
 
@@ -40,13 +40,36 @@ Special states:
 | From | To | Trigger |
 |------|----|---------|
 | `ai-ready` | `ai-in-progress` | Orchestrator dispatches coding agent |
-| `ai-in-progress` | `ai-testing` | Coding agent completes, opens draft PR |
+| `ai-in-progress` | `ai-testing` | Coding agent completes, opens draft PR targeting `ai/dev` |
 | `ai-testing` | `ai-review-needed` | Testing agent passes |
 | `ai-testing` | `ai-ready` | Testing agent fails, comments with failures |
 | `ai-review-needed` | `ai-pr-ready` | Review agent approves |
 | `ai-review-needed` | `ai-ready` | Review agent rejects, comments with feedback |
+| `ai-pr-ready` | `ai-merged` | Orchestrator auto-merges PR into `ai/dev` |
 | Any | `ai-blocked` | Agent detects ambiguity or unresolvable issue |
 | Any | `ai-error` | Agent crashes, times out, or hits guardrail |
+
+---
+
+## Integration Branch Pattern
+
+All agent work targets an integration branch (`ai/dev`) rather than `main` directly.
+
+```
+main (human-controlled)
+  └── ai/dev (agents merge here freely)
+        ├── ai/issue-1 (feature branch)
+        ├── ai/issue-2 (feature branch)
+        └── ai/issue-3 (feature branch)
+```
+
+**Why:** Prevents merge conflicts. Each coding agent branches from the latest `ai/dev`, so it sees all previously merged agent work. Agents never touch `main`.
+
+**Morning workflow:** Human reviews the cumulative `ai/dev → main` diff. If it's good, merge with one click. If individual changes are bad, revert specific commits or cherry-pick the good ones.
+
+**Per-repo setup:** The `ai/dev` branch must exist before the orchestrator runs. The setup script creates it if missing.
+
+**Auto-merge:** When the review agent approves a PR (label moves to `ai-pr-ready`), the orchestrator merges it into `ai/dev` automatically. If the merge fails (conflict), it labels the issue `ai-blocked` and notifies via Slack.
 
 ---
 
@@ -59,10 +82,10 @@ All agents are `claude -p` invocations with different prompts and tool access.
 - **Purpose:** Implement the work described in the issue
 - **Tool access:** Full write — Edit, Write, Bash, Glob, Grep, Read
 - **Behavior:**
-  - Creates a feature branch from the issue
+  - Creates a feature branch from `ai/dev` (not `main`)
   - Implements the work following the issue checklist and acceptance criteria
   - Writes tests before implementation (TDD principles, lean prompt)
-  - Opens a draft PR linking to the issue
+  - Opens a draft PR targeting `ai/dev`, linking to the issue
   - On completion: removes `ai-in-progress`, adds `ai-testing`
 - **Guardrails:**
   - Max 10 files changed
@@ -209,12 +232,16 @@ guardrails:
 slack:
   webhook_url: "${SLACK_WEBHOOK_URL}"
 
+branches:
+  integration: "ai/dev"  # agents branch from and merge into this
+
 labels:
   ready: "ai-ready"
   in_progress: "ai-in-progress"
   testing: "ai-testing"
   review_needed: "ai-review-needed"
   pr_ready: "ai-pr-ready"
+  merged: "ai-merged"
   blocked: "ai-blocked"
   error: "ai-error"
 ```

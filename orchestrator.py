@@ -29,9 +29,10 @@ class Orchestrator:
         self.review_agent = ReviewAgent()
 
     def run(self):
-        """Single orchestration cycle: check agents, dispatch new work."""
+        """Single orchestration cycle: check agents, dispatch new work, auto-merge."""
         self._check_running_agents()
         for repo in self.config["repos"]:
+            self._process_pr_ready_issues(repo)
             self._process_ready_issues(repo)
             self._process_testing_issues(repo)
             self._process_review_issues(repo)
@@ -90,6 +91,35 @@ class Orchestrator:
         issue_number = int(issue.split("#")[1])
         self.gh.add_comment(repo, issue_number, f"[agent-orchestrator] Attempt {agent['attempt']} completed ({agent['type']} agent).")
         self.state.remove_agent(pid)
+
+    def _process_pr_ready_issues(self, repo: str):
+        """Auto-merge approved PRs into the integration branch."""
+        issues = self.gh.fetch_issues_by_label(repo, self.labels["pr_ready"])
+        for issue in issues:
+            issue_key = f"{repo}#{issue.number}"
+            pr_branch = f"ai/issue-{issue.number}"
+            pr_number = self.gh.find_pr_for_branch(repo, pr_branch)
+
+            if pr_number is None:
+                logger.warning(f"No PR found for {issue_key} branch {pr_branch}")
+                continue
+
+            logger.info(f"Auto-merging PR #{pr_number} for {issue_key}")
+            try:
+                success = self.gh.merge_pr(repo, pr_number)
+                if success:
+                    self.gh.swap_label(repo, issue.number, self.labels["pr_ready"], self.labels["merged"])
+                    self.gh.add_comment(repo, issue.number, f"[agent-orchestrator] PR #{pr_number} auto-merged into {self.config['branches']['integration']}.")
+                    self.slack.notify_pr_ready(issue_key, pr_number)
+                else:
+                    logger.warning(f"Merge failed for PR #{pr_number} ({issue_key}) — not mergeable")
+                    self.gh.swap_label(repo, issue.number, self.labels["pr_ready"], self.labels["blocked"])
+                    self.gh.add_comment(repo, issue.number, f"[agent-orchestrator] PR #{pr_number} could not be merged (conflict or not mergeable). Marking blocked.")
+                    self.slack.notify_blocked(issue_key, f"PR #{pr_number} merge conflict")
+            except Exception as e:
+                logger.error(f"Merge error for PR #{pr_number} ({issue_key}): {e}")
+                self.gh.swap_label(repo, issue.number, self.labels["pr_ready"], self.labels["error"])
+                self.slack.notify_error(issue_key, f"Merge failed: {e}")
 
     def _process_ready_issues(self, repo: str):
         """Dispatch coding agents for ai-ready issues."""
@@ -156,11 +186,13 @@ class Orchestrator:
         issue_key = f"{repo}#{issue.number}"
         logger.info(f"Dispatching coding agent for {issue_key} (attempt {attempt})")
 
+        integration_branch = self.config.get("branches", {}).get("integration", "ai/dev")
         cmd = self.coding_agent.build_command(
             issue_title=issue.title,
             issue_body=issue.body or "",
             issue_number=issue.number,
             repo=repo,
+            integration_branch=integration_branch,
         )
         log_path = self.state.log_path(repo, issue.number)
         log_file = open(log_path, "w")

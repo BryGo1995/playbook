@@ -34,6 +34,7 @@ def test_coding_agent_builds_prompt():
     assert "owner/repo#42" in prompt
     assert "Acceptance Criteria" in prompt
     assert "draft PR" in prompt.lower() or "draft pull request" in prompt.lower()
+    assert "ai/dev" in prompt  # targets integration branch
 
 
 def test_coding_agent_command():

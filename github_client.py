@@ -36,6 +36,23 @@ class GitHubClient:
         issue = repo.get_issue(issue_number)
         issue.create_comment(body)
 
+    def merge_pr(self, repo_name: str, pr_number: int, merge_method: str = "squash") -> bool:
+        """Merge a pull request. Returns True on success, False on failure."""
+        repo = self.gh.get_repo(repo_name)
+        pr = repo.get_pull(pr_number)
+        if not pr.mergeable:
+            return False
+        pr.merge(merge_method=merge_method)
+        return True
+
+    def find_pr_for_branch(self, repo_name: str, branch: str) -> int | None:
+        """Find the PR number for a given branch. Returns None if not found."""
+        repo = self.gh.get_repo(repo_name)
+        pulls = repo.get_pulls(state="open", head=f"{repo_name.split('/')[0]}:{branch}")
+        for pr in pulls:
+            return pr.number
+        return None
+
     def get_attempt_count(self, repo_name: str, issue_number: int) -> int:
         repo = self.gh.get_repo(repo_name)
         issue = repo.get_issue(issue_number)
