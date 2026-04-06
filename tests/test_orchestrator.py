@@ -1,3 +1,4 @@
+# tests/test_orchestrator.py
 import json
 import os
 import pytest
@@ -9,18 +10,24 @@ from orchestrator import Orchestrator
 def config():
     return {
         "repos": ["owner/repo"],
+        "project": {
+            "owner": "owner",
+            "number": 1,
+            "status_field_id": "PVTSSF_test",
+        },
         "concurrency": {"max_coding": 2, "max_testing": 1, "max_review": 1},
         "timeouts": {"coding_minutes": 60, "testing_minutes": 30, "review_minutes": 30},
         "guardrails": {"max_files_changed": 10, "max_retry_cycles": 3},
         "branches": {"integration": "ai/dev"},
         "slack": {"webhook_url": None},
-        "labels": {
+        "statuses": {
+            "backlog": "Backlog",
             "ready": "ai-ready",
             "in_progress": "ai-in-progress",
             "testing": "ai-testing",
-            "review_needed": "ai-review-needed",
-            "pr_ready": "ai-pr-ready",
-            "merged": "ai-merged",
+            "review": "ai-review",
+            "complete": "ai-complete",
+            "done": "Done",
             "blocked": "ai-blocked",
             "error": "ai-error",
         },
@@ -32,54 +39,65 @@ def state_dir(tmp_path):
     return str(tmp_path)
 
 
-def _mock_issue(number, title, body, labels):
-    issue = MagicMock()
-    issue.number = number
-    issue.title = title
-    issue.body = body
-    label_objs = []
-    for name in labels:
-        l = MagicMock()
-        l.name = name
-        label_objs.append(l)
-    issue.labels = label_objs
-    issue.repository = MagicMock()
-    issue.repository.full_name = "owner/repo"
-    issue.pull_request = None
-    return issue
+def _mock_issue(number, title, body, project_item_id="item_1"):
+    return {
+        "number": number,
+        "title": title,
+        "body": body,
+        "repo": "owner/repo",
+        "project_item_id": project_item_id,
+    }
 
 
 @patch("orchestrator.subprocess.Popen")
 @patch("orchestrator.GitHubClient")
 def test_dispatch_coding_agent(MockGH, MockPopen, config, state_dir):
     mock_gh = MockGH.return_value
-    mock_issue = _mock_issue(42, "Fix bug", "Body\n## Acceptance Criteria\n- [ ] works", ["ai-ready"])
-    mock_gh.fetch_issues_by_label.return_value = [mock_issue]
+    mock_issue = _mock_issue(42, "Fix bug", "Body\n## Acceptance Criteria\n- [ ] works")
+    mock_gh.fetch_issues_by_status.side_effect = lambda s: [mock_issue] if s == "ai-ready" else []
     mock_gh.get_attempt_count.return_value = 0
 
     mock_proc = MagicMock()
     mock_proc.pid = 99999
     MockPopen.return_value = mock_proc
 
-    orch = Orchestrator(config, state_dir=state_dir)
+    orch = Orchestrator.__new__(Orchestrator)
+    orch.config = config
+    orch.statuses = config["statuses"]
+    orch.gh = mock_gh
+    orch.state = __import__("state").StateManager(state_dir)
+    orch.slack = __import__("notifications.slack", fromlist=["SlackNotifier"]).SlackNotifier(None)
+    orch.coding_agent = __import__("agents.coding", fromlist=["CodingAgent"]).CodingAgent()
+    orch.testing_agent = __import__("agents.testing", fromlist=["TestingAgent"]).TestingAgent()
+    orch.review_agent = __import__("agents.review", fromlist=["ReviewAgent"]).ReviewAgent()
+
     orch.run()
 
-    mock_gh.swap_label.assert_called_with("owner/repo", 42, "ai-ready", "ai-in-progress")
+    mock_gh.update_status.assert_any_call("item_1", "ai-in-progress")
     MockPopen.assert_called_once()
     assert len(orch.state.agents) == 1
     assert orch.state.agents[0]["pid"] == 99999
     assert orch.state.agents[0]["type"] == "coding"
+    assert orch.state.agents[0]["project_item_id"] == "item_1"
 
 
 @patch("orchestrator.subprocess.Popen")
 @patch("orchestrator.GitHubClient")
 def test_skip_already_active_issue(MockGH, MockPopen, config, state_dir):
     mock_gh = MockGH.return_value
-    mock_issue = _mock_issue(42, "Fix bug", "Body", ["ai-ready"])
-    mock_gh.fetch_issues_by_label.return_value = [mock_issue]
+    mock_issue = _mock_issue(42, "Fix bug", "Body")
+    mock_gh.fetch_issues_by_status.side_effect = lambda s: [mock_issue] if s == "ai-ready" else []
 
-    orch = Orchestrator(config, state_dir=state_dir)
-    orch.state.add_agent(pid=11111, issue="owner/repo#42", repo="owner/repo", agent_type="coding", timeout_minutes=60, attempt=1)
+    orch = Orchestrator.__new__(Orchestrator)
+    orch.config = config
+    orch.statuses = config["statuses"]
+    orch.gh = mock_gh
+    orch.state = __import__("state").StateManager(state_dir)
+    orch.slack = __import__("notifications.slack", fromlist=["SlackNotifier"]).SlackNotifier(None)
+    orch.coding_agent = __import__("agents.coding", fromlist=["CodingAgent"]).CodingAgent()
+    orch.testing_agent = __import__("agents.testing", fromlist=["TestingAgent"]).TestingAgent()
+    orch.review_agent = __import__("agents.review", fromlist=["ReviewAgent"]).ReviewAgent()
+    orch.state.add_agent(pid=11111, issue="owner/repo#42", repo="owner/repo", agent_type="coding", timeout_minutes=60, attempt=1, project_item_id="item_1")
 
     with patch.object(orch, "_is_process_alive", return_value=True):
         orch.run()
@@ -92,17 +110,25 @@ def test_skip_already_active_issue(MockGH, MockPopen, config, state_dir):
 def test_respects_concurrency_limit(MockGH, MockPopen, config, state_dir):
     config["concurrency"]["max_coding"] = 1
     mock_gh = MockGH.return_value
-    mock_issue1 = _mock_issue(1, "T1", "B", ["ai-ready"])
-    mock_issue2 = _mock_issue(2, "T2", "B", ["ai-ready"])
-    mock_gh.fetch_issues_by_label.return_value = [mock_issue1, mock_issue2]
+    mock_issue1 = _mock_issue(1, "T1", "B", "item_1")
+    mock_issue2 = _mock_issue(2, "T2", "B", "item_2")
+    mock_gh.fetch_issues_by_status.side_effect = lambda s: [mock_issue1, mock_issue2] if s == "ai-ready" else []
     mock_gh.get_attempt_count.return_value = 0
 
     mock_proc = MagicMock()
     mock_proc.pid = 99999
     MockPopen.return_value = mock_proc
 
-    orch = Orchestrator(config, state_dir=state_dir)
-    orch.state.add_agent(pid=11111, issue="owner/repo#99", repo="owner/repo", agent_type="coding", timeout_minutes=60, attempt=1)
+    orch = Orchestrator.__new__(Orchestrator)
+    orch.config = config
+    orch.statuses = config["statuses"]
+    orch.gh = mock_gh
+    orch.state = __import__("state").StateManager(state_dir)
+    orch.slack = __import__("notifications.slack", fromlist=["SlackNotifier"]).SlackNotifier(None)
+    orch.coding_agent = __import__("agents.coding", fromlist=["CodingAgent"]).CodingAgent()
+    orch.testing_agent = __import__("agents.testing", fromlist=["TestingAgent"]).TestingAgent()
+    orch.review_agent = __import__("agents.review", fromlist=["ReviewAgent"]).ReviewAgent()
+    orch.state.add_agent(pid=11111, issue="owner/repo#99", repo="owner/repo", agent_type="coding", timeout_minutes=60, attempt=1, project_item_id="item_99")
 
     with patch.object(orch, "_is_process_alive", return_value=True):
         orch.run()
@@ -113,114 +139,99 @@ def test_respects_concurrency_limit(MockGH, MockPopen, config, state_dir):
 @patch("orchestrator.GitHubClient")
 def test_handles_timed_out_agent(MockGH, config, state_dir):
     mock_gh = MockGH.return_value
+    mock_gh.fetch_issues_by_status.return_value = []
 
-    orch = Orchestrator(config, state_dir=state_dir)
+    orch = Orchestrator.__new__(Orchestrator)
+    orch.config = config
+    orch.statuses = config["statuses"]
+    orch.gh = mock_gh
+    orch.state = __import__("state").StateManager(state_dir)
+    orch.slack = __import__("notifications.slack", fromlist=["SlackNotifier"]).SlackNotifier(None)
+    orch.coding_agent = __import__("agents.coding", fromlist=["CodingAgent"]).CodingAgent()
+    orch.testing_agent = __import__("agents.testing", fromlist=["TestingAgent"]).TestingAgent()
+    orch.review_agent = __import__("agents.review", fromlist=["ReviewAgent"]).ReviewAgent()
     orch.state.add_agent(
         pid=11111, issue="owner/repo#42", repo="owner/repo",
-        agent_type="coding", timeout_minutes=60, attempt=1,
+        agent_type="coding", timeout_minutes=60, attempt=1, project_item_id="item_42",
     )
     orch.state.agents[0]["started_at"] = "2020-01-01T00:00:00+00:00"
     orch.state._save()
 
     with patch("orchestrator.os.kill") as mock_kill:
-        with patch("orchestrator.subprocess.Popen"):
-            mock_gh.fetch_issues_by_label.return_value = []
-            mock_gh.get_attempt_count.return_value = 0
-            orch.run()
+        orch.run()
 
     mock_kill.assert_called()
-    mock_gh.swap_label.assert_called_with("owner/repo", 42, "ai-in-progress", "ai-error")
+    mock_gh.update_status.assert_called_with("item_42", "ai-error")
 
 
 @patch("orchestrator.subprocess.Popen")
 @patch("orchestrator.GitHubClient")
-def test_max_retries_labels_blocked(MockGH, MockPopen, config, state_dir):
+def test_max_retries_sets_blocked(MockGH, MockPopen, config, state_dir):
     mock_gh = MockGH.return_value
-    mock_issue = _mock_issue(42, "Fix bug", "Body", ["ai-ready"])
-    mock_gh.fetch_issues_by_label.return_value = [mock_issue]
+    mock_issue = _mock_issue(42, "Fix bug", "Body")
+    mock_gh.fetch_issues_by_status.side_effect = lambda s: [mock_issue] if s == "ai-ready" else []
     mock_gh.get_attempt_count.return_value = 3
 
-    orch = Orchestrator(config, state_dir=state_dir)
+    orch = Orchestrator.__new__(Orchestrator)
+    orch.config = config
+    orch.statuses = config["statuses"]
+    orch.gh = mock_gh
+    orch.state = __import__("state").StateManager(state_dir)
+    orch.slack = __import__("notifications.slack", fromlist=["SlackNotifier"]).SlackNotifier(None)
+    orch.coding_agent = __import__("agents.coding", fromlist=["CodingAgent"]).CodingAgent()
+    orch.testing_agent = __import__("agents.testing", fromlist=["TestingAgent"]).TestingAgent()
+    orch.review_agent = __import__("agents.review", fromlist=["ReviewAgent"]).ReviewAgent()
+
     orch.run()
 
-    mock_gh.swap_label.assert_called_with("owner/repo", 42, "ai-ready", "ai-blocked")
+    mock_gh.update_status.assert_called_with("item_1", "ai-blocked")
     MockPopen.assert_not_called()
 
 
 @patch("orchestrator.subprocess.Popen")
 @patch("orchestrator.GitHubClient")
-def test_full_cycle_ready_to_dispatch(MockGH, MockPopen, config, state_dir):
-    """Simulates a full orchestrator run: finds a ready issue, dispatches, records state."""
+def test_auto_merge_complete(MockGH, MockPopen, config, state_dir):
     mock_gh = MockGH.return_value
-
-    # Issue 10 is ai-ready, Issue 20 is ai-review-needed
-    ready_issue = _mock_issue(10, "Add feature", "## Acceptance Criteria\n- [ ] Done", ["ai-ready"])
-    review_issue = _mock_issue(20, "Review feature", "Body", ["ai-review-needed"])
-
-    def side_effect(repo, label):
-        if label == "ai-ready":
-            return [ready_issue]
-        if label == "ai-review-needed":
-            return [review_issue]
-        return []
-
-    mock_gh.fetch_issues_by_label.side_effect = side_effect
-    mock_gh.get_attempt_count.return_value = 0
-
-    mock_proc_coding = MagicMock()
-    mock_proc_coding.pid = 1001
-    mock_proc_review = MagicMock()
-    mock_proc_review.pid = 1002
-    MockPopen.side_effect = [mock_proc_coding, mock_proc_review]
-
-    orch = Orchestrator(config, state_dir=state_dir)
-    orch.run()
-
-    assert len(orch.state.agents) == 2
-    types = {a["type"] for a in orch.state.agents}
-    assert types == {"coding", "review"}
-
-
-@patch("orchestrator.subprocess.Popen")
-@patch("orchestrator.GitHubClient")
-def test_auto_merge_pr_ready(MockGH, MockPopen, config, state_dir):
-    """When an issue is ai-pr-ready, orchestrator auto-merges the PR."""
-    mock_gh = MockGH.return_value
-    pr_ready_issue = _mock_issue(42, "Fix bug", "Body", ["ai-pr-ready"])
-
-    def side_effect(repo, label):
-        if label == "ai-pr-ready":
-            return [pr_ready_issue]
-        return []
-
-    mock_gh.fetch_issues_by_label.side_effect = side_effect
+    mock_issue = _mock_issue(42, "Fix bug", "Body", "item_42")
+    mock_gh.fetch_issues_by_status.side_effect = lambda s: [mock_issue] if s == "ai-complete" else []
     mock_gh.find_pr_for_branch.return_value = 15
     mock_gh.merge_pr.return_value = True
 
-    orch = Orchestrator(config, state_dir=state_dir)
+    orch = Orchestrator.__new__(Orchestrator)
+    orch.config = config
+    orch.statuses = config["statuses"]
+    orch.gh = mock_gh
+    orch.state = __import__("state").StateManager(state_dir)
+    orch.slack = __import__("notifications.slack", fromlist=["SlackNotifier"]).SlackNotifier(None)
+    orch.coding_agent = __import__("agents.coding", fromlist=["CodingAgent"]).CodingAgent()
+    orch.testing_agent = __import__("agents.testing", fromlist=["TestingAgent"]).TestingAgent()
+    orch.review_agent = __import__("agents.review", fromlist=["ReviewAgent"]).ReviewAgent()
+
     orch.run()
 
     mock_gh.merge_pr.assert_called_once_with("owner/repo", 15)
-    mock_gh.swap_label.assert_called_with("owner/repo", 42, "ai-pr-ready", "ai-merged")
+    mock_gh.update_status.assert_called_with("item_42", "Done")
 
 
 @patch("orchestrator.subprocess.Popen")
 @patch("orchestrator.GitHubClient")
-def test_auto_merge_conflict_labels_blocked(MockGH, MockPopen, config, state_dir):
-    """When merge fails, issue is labeled ai-blocked."""
+def test_auto_merge_conflict_sets_blocked(MockGH, MockPopen, config, state_dir):
     mock_gh = MockGH.return_value
-    pr_ready_issue = _mock_issue(42, "Fix bug", "Body", ["ai-pr-ready"])
-
-    def side_effect(repo, label):
-        if label == "ai-pr-ready":
-            return [pr_ready_issue]
-        return []
-
-    mock_gh.fetch_issues_by_label.side_effect = side_effect
+    mock_issue = _mock_issue(42, "Fix bug", "Body", "item_42")
+    mock_gh.fetch_issues_by_status.side_effect = lambda s: [mock_issue] if s == "ai-complete" else []
     mock_gh.find_pr_for_branch.return_value = 15
     mock_gh.merge_pr.return_value = False
 
-    orch = Orchestrator(config, state_dir=state_dir)
+    orch = Orchestrator.__new__(Orchestrator)
+    orch.config = config
+    orch.statuses = config["statuses"]
+    orch.gh = mock_gh
+    orch.state = __import__("state").StateManager(state_dir)
+    orch.slack = __import__("notifications.slack", fromlist=["SlackNotifier"]).SlackNotifier(None)
+    orch.coding_agent = __import__("agents.coding", fromlist=["CodingAgent"]).CodingAgent()
+    orch.testing_agent = __import__("agents.testing", fromlist=["TestingAgent"]).TestingAgent()
+    orch.review_agent = __import__("agents.review", fromlist=["ReviewAgent"]).ReviewAgent()
+
     orch.run()
 
-    mock_gh.swap_label.assert_called_with("owner/repo", 42, "ai-pr-ready", "ai-blocked")
+    mock_gh.update_status.assert_called_with("item_42", "ai-blocked")

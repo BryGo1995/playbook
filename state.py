@@ -34,6 +34,7 @@ class StateManager:
         agent_type: str,
         timeout_minutes: int,
         attempt: int,
+        project_item_id: str | None = None,
     ):
         self.agents.append(
             {
@@ -44,6 +45,7 @@ class StateManager:
                 "started_at": datetime.now(timezone.utc).isoformat(),
                 "timeout_minutes": timeout_minutes,
                 "attempt": attempt,
+                "project_item_id": project_item_id,
             }
         )
         self._save()
