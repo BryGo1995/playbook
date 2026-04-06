@@ -108,7 +108,7 @@ jobs:
             done
             echo ""
             echo "---"
-            echo "*Auto-maintained by [integration-pr](https://github.com/BryGo1995/agent-orchestrator) workflow*"
+            echo "*Auto-maintained by [integration-pr](https://github.com/BryGo1995/playbook) workflow*"
             echo "BODY_EOF"
           } >> "$GITHUB_OUTPUT"
 
