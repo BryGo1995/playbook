@@ -13,9 +13,10 @@ CODING_PROMPT = """You are a coding agent working on GitHub issue {repo}#{issue_
 2. Implement the work described in the issue, following the checklist and acceptance criteria.
 3. Write tests before implementation. Run tests to verify they fail, then implement.
 4. Run all tests to ensure they pass.
-5. Open a draft pull request targeting `{integration_branch}`, linking to issue #{issue_number}.
-6. Keep changes focused — modify no more than 10 files.
-7. If the requirements are ambiguous or you cannot proceed, stop and explain why in a comment.
+5. If the project has a linter configured (e.g., ruff, eslint), run it and fix any issues before proceeding.
+6. Open a draft pull request targeting `{integration_branch}`, linking to issue #{issue_number}.
+7. Keep changes focused — modify no more than 10 files.
+8. If the requirements are ambiguous or you cannot proceed, stop and explain why in a comment.
 
 IMPORTANT: Branch from `{integration_branch}`, NOT from `main`. Target the PR to `{integration_branch}`.
 Do NOT merge anything. Draft PR only.

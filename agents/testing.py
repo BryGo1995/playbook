@@ -12,11 +12,12 @@ TESTING_PROMPT = """You are a testing agent verifying work on GitHub issue {repo
 ## Instructions
 
 1. Check out the branch `{pr_branch}`.
-2. Run the existing test suite. Record any failures.
-3. Review the acceptance criteria in the issue. For each criterion, verify there is a test covering it.
-4. If tests are missing for acceptance criteria, write them in the appropriate test files.
-5. Run the full test suite again. All tests must pass.
-6. If tests fail and you cannot fix them by adding test code only, stop and report the failures.
+2. If the project has a linter configured (e.g., ruff, eslint), run it first. If there are lint errors, stop and report them — do not proceed to testing.
+3. Run the existing test suite. Record any failures.
+4. Review the acceptance criteria in the issue. For each criterion, verify there is a test covering it.
+5. If tests are missing for acceptance criteria, write them in the appropriate test files.
+6. Run the full test suite again. All tests must pass.
+7. If tests fail and you cannot fix them by adding test code only, stop and report the failures.
 
 You may only write code in test files. Do not modify implementation code.
 """
