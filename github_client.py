@@ -169,6 +169,76 @@ class GitHubClient:
 
         return issues
 
+    def fetch_all_project_issues(self) -> list[dict]:
+        """Fetch all issues in the project with their status names.
+
+        Returns a list of dicts with keys: number, title, body, repo, project_item_id, status
+        """
+        issues = []
+        cursor = None
+
+        while True:
+            after_clause = f', after: "{cursor}"' if cursor else ""
+            data = self._graphql(
+                f"""
+                query($projectId: ID!) {{
+                    node(id: $projectId) {{
+                        ... on ProjectV2 {{
+                            items(first: 50{after_clause}) {{
+                                pageInfo {{
+                                    hasNextPage
+                                    endCursor
+                                }}
+                                nodes {{
+                                    id
+                                    fieldValueByName(name: "Status") {{
+                                        ... on ProjectV2ItemFieldSingleSelectValue {{
+                                            name
+                                        }}
+                                    }}
+                                    content {{
+                                        ... on Issue {{
+                                            number
+                                            title
+                                            body
+                                            state
+                                            repository {{
+                                                nameWithOwner
+                                            }}
+                                        }}
+                                    }}
+                                }}
+                            }}
+                        }}
+                    }}
+                }}
+                """,
+                {"projectId": self._project_id},
+            )
+
+            items = data["node"]["items"]
+            for node in items["nodes"]:
+                content = node.get("content")
+                if not content or not content.get("number"):
+                    continue
+                field_value = node.get("fieldValueByName")
+                status_name = field_value.get("name") if field_value else None
+                issues.append({
+                    "number": content["number"],
+                    "title": content["title"],
+                    "body": content.get("body", ""),
+                    "repo": content["repository"]["nameWithOwner"],
+                    "project_item_id": node["id"],
+                    "status": status_name,
+                })
+
+            if items["pageInfo"]["hasNextPage"]:
+                cursor = items["pageInfo"]["endCursor"]
+            else:
+                break
+
+        return issues
+
     # --- Update project status ---
 
     def update_status(self, project_item_id: str, new_status_name: str):

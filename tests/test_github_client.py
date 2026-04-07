@@ -110,3 +110,46 @@ def test_find_pr_for_branch_none(client):
     client._mock_requests.get.return_value = mock_resp
 
     assert client.find_pr_for_branch("owner/repo", "ai/issue-99") is None
+
+
+def test_fetch_all_project_issues(client):
+    mock_resp = MagicMock()
+    mock_resp.json.return_value = {"data": {
+        "node": {
+            "items": {
+                "pageInfo": {"hasNextPage": False, "endCursor": None},
+                "nodes": [
+                    {
+                        "id": "item_1",
+                        "fieldValueByName": {"name": "ai-ready"},
+                        "content": {
+                            "number": 1,
+                            "title": "[v0.1] Feature A",
+                            "body": "body",
+                            "state": "OPEN",
+                            "repository": {"nameWithOwner": "owner/repo"},
+                        },
+                    },
+                    {
+                        "id": "item_2",
+                        "fieldValueByName": {"name": "Done"},
+                        "content": {
+                            "number": 2,
+                            "title": "[v0.1] Feature B",
+                            "body": "body",
+                            "state": "OPEN",
+                            "repository": {"nameWithOwner": "owner/repo"},
+                        },
+                    },
+                ],
+            }
+        }
+    }}
+    mock_resp.raise_for_status = MagicMock()
+    client._mock_requests.post.return_value = mock_resp
+
+    issues = client.fetch_all_project_issues()
+    assert len(issues) == 2
+    assert issues[0]["title"] == "[v0.1] Feature A"
+    assert issues[0]["status"] == "ai-ready"
+    assert issues[1]["status"] == "Done"
