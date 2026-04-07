@@ -4,6 +4,9 @@
 repos:
   - BryGo1995/paint-ballas-auto
 
+local_paths:
+  BryGo1995/paint-ballas-auto: "/home/bryang/Dev_Space/bee_gee_games/godot/paint-ballas-auto"
+
 project:
   owner: "BryGo1995"
   number: 9

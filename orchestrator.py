@@ -108,13 +108,25 @@ class Orchestrator:
         self.state.remove_agent(pid)
 
     def _handle_completion(self, agent: dict):
-        """Agent process exited — clean up state."""
+        """Agent process exited — clean up state and advance status."""
         pid = agent["pid"]
         issue = agent["issue"]
         logger.info(f"Agent completed: {issue} (pid={pid}, type={agent['type']})")
         repo = agent["repo"]
         issue_number = int(issue.split("#")[1])
+        project_item_id = agent.get("project_item_id")
         self.gh.add_comment(repo, issue_number, f"[agent-orchestrator] Attempt {agent['attempt']} completed ({agent['type']} agent).")
+
+        # Advance to next status in the pipeline
+        next_status = {
+            "coding": self.statuses["testing"],
+            "testing": self.statuses["review"],
+            "review": self.statuses["complete"],
+        }
+        if project_item_id and agent["type"] in next_status:
+            self.gh.update_status(project_item_id, next_status[agent["type"]])
+            logger.info(f"Advanced {issue} to {next_status[agent['type']]}")
+
         self.state.remove_agent(pid)
 
     def _process_complete_issues(self):
@@ -240,7 +252,8 @@ class Orchestrator:
         )
         log_path = self.state.log_path(issue["repo"], issue["number"])
         log_file = open(log_path, "w")
-        proc = subprocess.Popen(cmd, stdout=log_file, stderr=subprocess.STDOUT)
+        cwd = self.config.get("local_paths", {}).get(issue["repo"])
+        proc = subprocess.Popen(cmd, stdout=log_file, stderr=subprocess.STDOUT, cwd=cwd)
 
         self.gh.update_status(issue["project_item_id"], self.statuses["in_progress"])
         self.state.add_agent(
@@ -267,7 +280,8 @@ class Orchestrator:
         )
         log_path = self.state.log_path(issue["repo"], issue["number"])
         log_file = open(log_path, "w")
-        proc = subprocess.Popen(cmd, stdout=log_file, stderr=subprocess.STDOUT)
+        cwd = self.config.get("local_paths", {}).get(issue["repo"])
+        proc = subprocess.Popen(cmd, stdout=log_file, stderr=subprocess.STDOUT, cwd=cwd)
 
         self.state.add_agent(
             pid=proc.pid,
@@ -293,7 +307,8 @@ class Orchestrator:
         )
         log_path = self.state.log_path(issue["repo"], issue["number"])
         log_file = open(log_path, "w")
-        proc = subprocess.Popen(cmd, stdout=log_file, stderr=subprocess.STDOUT)
+        cwd = self.config.get("local_paths", {}).get(issue["repo"])
+        proc = subprocess.Popen(cmd, stdout=log_file, stderr=subprocess.STDOUT, cwd=cwd)
 
         self.state.add_agent(
             pid=proc.pid,
