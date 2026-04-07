@@ -6,6 +6,7 @@ import sys
 from datetime import datetime, timezone
 
 from config import load_config
+from versioning import parse_version, get_active_version
 from state import StateManager
 from github_client import GitHubClient
 from agents.coding import CodingAgent
@@ -32,11 +33,13 @@ class Orchestrator:
         self.coding_agent = CodingAgent()
         self.testing_agent = TestingAgent()
         self.review_agent = ReviewAgent()
+        self._notified_versions = set()
 
     def run(self):
         """Single orchestration cycle: check agents, auto-merge, dispatch new work."""
         self._check_running_agents()
         self._process_complete_issues()
+        self._check_version_completion()
         self._process_ready_issues()
         self._process_testing_issues()
         self._process_review_issues()
@@ -50,6 +53,25 @@ class Orchestrator:
                     self._handle_timeout(agent)
             else:
                 self._handle_completion(agent)
+
+    def _check_version_completion(self):
+        """Check if the most recently completed version should trigger a notification."""
+        if not self.config.get("versioning", {}).get("enabled", False):
+            return
+        all_issues = self.gh.fetch_all_project_issues()
+        version_issues: dict[tuple[int, int], list[dict]] = {}
+        for issue in all_issues:
+            version = parse_version(issue["title"])
+            if version is not None:
+                version_issues.setdefault(version, []).append(issue)
+
+        for version in sorted(version_issues.keys()):
+            statuses = [i["status"] for i in version_issues[version]]
+            if all(s == "Done" for s in statuses) and version not in self._notified_versions:
+                self._notified_versions.add(version)
+                version_label = "bootstrap" if version == (0, 0) else f"v{version[0]}.{version[1]}"
+                logger.info(f"Version {version_label} complete")
+                self.slack.notify_version_complete(version_label, len(statuses))
 
     def _is_process_alive(self, pid: int) -> bool:
         try:
@@ -124,12 +146,31 @@ class Orchestrator:
                 self.slack.notify_error(issue_key, f"Merge failed: {e}")
 
     def _process_ready_issues(self):
-        """Dispatch coding agents for ai-ready issues."""
+        """Dispatch coding agents for ai-ready issues, respecting version gating."""
         issues = self.gh.fetch_issues_by_status(self.statuses["ready"])
+        versioning_enabled = self.config.get("versioning", {}).get("enabled", False)
+        active_version = None
+        is_bootstrap = False
+
+        if versioning_enabled:
+            all_issues = self.gh.fetch_all_project_issues()
+            active_version = get_active_version(all_issues)
+
         for issue in issues:
             issue_key = f"{issue['repo']}#{issue['number']}"
             if self.state.is_issue_active(issue_key):
                 continue
+
+            # Version filter: skip issues not in the active version
+            if versioning_enabled:
+                issue_version = parse_version(issue["title"])
+                if active_version is not None:
+                    if issue_version != active_version:
+                        continue
+                    is_bootstrap = active_version == (0, 0)
+                else:
+                    if issue_version is not None:
+                        continue
 
             attempt_count = self.gh.get_attempt_count(issue["repo"], issue["number"])
             if attempt_count >= self.config["guardrails"]["max_retry_cycles"]:
@@ -140,12 +181,19 @@ class Orchestrator:
                 self.slack.notify_max_retries(issue_key, self.config["guardrails"]["max_retry_cycles"])
                 continue
 
+            # Bootstrap: max 1 concurrent coding agent
+            max_coding = 1 if is_bootstrap else self.config["concurrency"]["max_coding"]
             current_coding = len(self.state.get_agents_by_type("coding"))
-            if current_coding >= self.config["concurrency"]["max_coding"]:
-                logger.info(f"Coding concurrency limit reached ({current_coding}), skipping {issue_key}")
+            if current_coding >= max_coding:
+                logger.info(f"Coding concurrency limit reached ({current_coding}/{max_coding}), skipping {issue_key}")
                 break
 
-            self._dispatch_coding(issue, attempt_count + 1)
+            if is_bootstrap:
+                timeout = self.config.get("versioning", {}).get("bootstrap_timeout_minutes", 120)
+                budget = self.config.get("versioning", {}).get("bootstrap_max_budget_usd", 5.0)
+                self._dispatch_coding(issue, attempt_count + 1, timeout_override=timeout, budget_override=budget)
+            else:
+                self._dispatch_coding(issue, attempt_count + 1)
 
     def _process_testing_issues(self):
         """Dispatch testing agents for ai-testing issues."""
@@ -175,10 +223,11 @@ class Orchestrator:
 
             self._dispatch_review(issue)
 
-    def _dispatch_coding(self, issue: dict, attempt: int):
+    def _dispatch_coding(self, issue: dict, attempt: int, timeout_override: int | None = None, budget_override: float | None = None):
         issue_key = f"{issue['repo']}#{issue['number']}"
         logger.info(f"Dispatching coding agent for {issue_key} (attempt {attempt})")
 
+        timeout = timeout_override or self.config["timeouts"]["coding_minutes"]
         integration_branch = self.config.get("branches", {}).get("integration", "ai/dev")
         cmd = self.coding_agent.build_command(
             issue_title=issue["title"],
@@ -186,6 +235,7 @@ class Orchestrator:
             issue_number=issue["number"],
             repo=issue["repo"],
             integration_branch=integration_branch,
+            max_budget_usd=budget_override or 1.0,
         )
         log_path = self.state.log_path(issue["repo"], issue["number"])
         log_file = open(log_path, "w")
@@ -197,7 +247,7 @@ class Orchestrator:
             issue=issue_key,
             repo=issue["repo"],
             agent_type="coding",
-            timeout_minutes=self.config["timeouts"]["coding_minutes"],
+            timeout_minutes=timeout,
             attempt=attempt,
             project_item_id=issue["project_item_id"],
         )

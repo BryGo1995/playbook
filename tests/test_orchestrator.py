@@ -235,3 +235,105 @@ def test_auto_merge_conflict_sets_blocked(MockGH, MockPopen, config, state_dir):
     orch.run()
 
     mock_gh.update_status.assert_called_with("item_42", "ai-blocked")
+
+
+@patch("orchestrator.subprocess.Popen")
+@patch("orchestrator.GitHubClient")
+def test_version_gating_dispatches_only_active_version(MockGH, MockPopen, config, state_dir):
+    config["versioning"] = {"enabled": True, "auto_create_issues": False, "bootstrap_timeout_minutes": 120, "bootstrap_max_budget_usd": 5.0}
+    mock_gh = MockGH.return_value
+    v1_issue = _mock_issue(1, "[v0.1] Feature A", "Body", "item_1")
+    v2_issue = _mock_issue(2, "[v0.2] Feature B", "Body", "item_2")
+    mock_gh.fetch_issues_by_status.side_effect = lambda s: [v1_issue, v2_issue] if s == "ai-ready" else []
+    mock_gh.fetch_all_project_issues.return_value = [
+        {"title": "[v0.1] Feature A", "status": "ai-ready"},
+        {"title": "[v0.2] Feature B", "status": "ai-ready"},
+    ]
+    mock_gh.get_attempt_count.return_value = 0
+
+    mock_proc = MagicMock()
+    mock_proc.pid = 99999
+    MockPopen.return_value = mock_proc
+
+    orch = Orchestrator.__new__(Orchestrator)
+    orch.config = config
+    orch.statuses = config["statuses"]
+    orch.gh = mock_gh
+    orch.state = __import__("state").StateManager(state_dir)
+    orch.slack = __import__("notifications.slack", fromlist=["SlackNotifier"]).SlackNotifier(None)
+    orch.coding_agent = __import__("agents.coding", fromlist=["CodingAgent"]).CodingAgent()
+    orch.testing_agent = __import__("agents.testing", fromlist=["TestingAgent"]).TestingAgent()
+    orch.review_agent = __import__("agents.review", fromlist=["ReviewAgent"]).ReviewAgent()
+    orch._notified_versions = set()
+
+    orch.run()
+
+    # Should only dispatch v0.1 issue, not v0.2
+    MockPopen.assert_called_once()
+    assert orch.state.agents[0]["issue"] == "owner/repo#1"
+
+
+@patch("orchestrator.subprocess.Popen")
+@patch("orchestrator.GitHubClient")
+def test_bootstrap_limits_concurrency_to_one(MockGH, MockPopen, config, state_dir):
+    config["versioning"] = {"enabled": True, "auto_create_issues": False, "bootstrap_timeout_minutes": 120, "bootstrap_max_budget_usd": 5.0}
+    config["concurrency"]["max_coding"] = 3
+    mock_gh = MockGH.return_value
+    boot1 = _mock_issue(1, "[bootstrap] Setup A", "Body", "item_1")
+    boot2 = _mock_issue(2, "[bootstrap] Setup B", "Body", "item_2")
+    mock_gh.fetch_issues_by_status.side_effect = lambda s: [boot1, boot2] if s == "ai-ready" else []
+    mock_gh.fetch_all_project_issues.return_value = [
+        {"title": "[bootstrap] Setup A", "status": "ai-ready"},
+        {"title": "[bootstrap] Setup B", "status": "ai-ready"},
+    ]
+    mock_gh.get_attempt_count.return_value = 0
+
+    mock_proc = MagicMock()
+    mock_proc.pid = 99999
+    MockPopen.return_value = mock_proc
+
+    orch = Orchestrator.__new__(Orchestrator)
+    orch.config = config
+    orch.statuses = config["statuses"]
+    orch.gh = mock_gh
+    orch.state = __import__("state").StateManager(state_dir)
+    orch.slack = __import__("notifications.slack", fromlist=["SlackNotifier"]).SlackNotifier(None)
+    orch.coding_agent = __import__("agents.coding", fromlist=["CodingAgent"]).CodingAgent()
+    orch.testing_agent = __import__("agents.testing", fromlist=["TestingAgent"]).TestingAgent()
+    orch.review_agent = __import__("agents.review", fromlist=["ReviewAgent"]).ReviewAgent()
+    orch._notified_versions = set()
+
+    orch.run()
+
+    # Bootstrap should only dispatch 1 even though max_coding is 3
+    MockPopen.assert_called_once()
+
+
+@patch("orchestrator.subprocess.Popen")
+@patch("orchestrator.GitHubClient")
+def test_version_completion_sends_slack(MockGH, MockPopen, config, state_dir):
+    config["versioning"] = {"enabled": True, "auto_create_issues": False, "bootstrap_timeout_minutes": 120, "bootstrap_max_budget_usd": 5.0}
+    mock_gh = MockGH.return_value
+    mock_gh.fetch_issues_by_status.return_value = []
+    mock_gh.fetch_all_project_issues.return_value = [
+        {"title": "[v0.1] Feature A", "status": "Done"},
+        {"title": "[v0.1] Feature B", "status": "Done"},
+        {"title": "[v0.2] Feature C", "status": "ai-ready"},
+    ]
+
+    mock_slack = MagicMock()
+
+    orch = Orchestrator.__new__(Orchestrator)
+    orch.config = config
+    orch.statuses = config["statuses"]
+    orch.gh = mock_gh
+    orch.state = __import__("state").StateManager(state_dir)
+    orch.slack = mock_slack
+    orch.coding_agent = __import__("agents.coding", fromlist=["CodingAgent"]).CodingAgent()
+    orch.testing_agent = __import__("agents.testing", fromlist=["TestingAgent"]).TestingAgent()
+    orch.review_agent = __import__("agents.review", fromlist=["ReviewAgent"]).ReviewAgent()
+    orch._notified_versions = set()
+
+    orch.run()
+
+    mock_slack.notify_version_complete.assert_called_once_with("v0.1", 2)
