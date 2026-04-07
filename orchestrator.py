@@ -39,8 +39,12 @@ class Orchestrator:
         """Single orchestration cycle: check agents, auto-merge, dispatch new work."""
         self._check_running_agents()
         self._process_complete_issues()
-        self._check_version_completion()
-        self._process_ready_issues()
+        # Fetch all project issues once per cycle if versioning is enabled
+        all_issues = None
+        if self.config.get("versioning", {}).get("enabled", False):
+            all_issues = self.gh.fetch_all_project_issues()
+        self._check_version_completion(all_issues)
+        self._process_ready_issues(all_issues)
         self._process_testing_issues()
         self._process_review_issues()
 
@@ -54,11 +58,10 @@ class Orchestrator:
             else:
                 self._handle_completion(agent)
 
-    def _check_version_completion(self):
+    def _check_version_completion(self, all_issues: list[dict] | None = None):
         """Check if the most recently completed version should trigger a notification."""
-        if not self.config.get("versioning", {}).get("enabled", False):
+        if all_issues is None:
             return
-        all_issues = self.gh.fetch_all_project_issues()
         version_issues: dict[tuple[int, int], list[dict]] = {}
         for issue in all_issues:
             version = parse_version(issue["title"])
@@ -145,15 +148,13 @@ class Orchestrator:
                 self.gh.update_status(issue["project_item_id"], self.statuses["error"])
                 self.slack.notify_error(issue_key, f"Merge failed: {e}")
 
-    def _process_ready_issues(self):
+    def _process_ready_issues(self, all_issues: list[dict] | None = None):
         """Dispatch coding agents for ai-ready issues, respecting version gating."""
         issues = self.gh.fetch_issues_by_status(self.statuses["ready"])
-        versioning_enabled = self.config.get("versioning", {}).get("enabled", False)
         active_version = None
         is_bootstrap = False
 
-        if versioning_enabled:
-            all_issues = self.gh.fetch_all_project_issues()
+        if all_issues is not None:
             active_version = get_active_version(all_issues)
 
         for issue in issues:
@@ -162,7 +163,7 @@ class Orchestrator:
                 continue
 
             # Version filter: skip issues not in the active version
-            if versioning_enabled:
+            if all_issues is not None:
                 issue_version = parse_version(issue["title"])
                 if active_version is not None:
                     if issue_version != active_version:
@@ -227,7 +228,7 @@ class Orchestrator:
         issue_key = f"{issue['repo']}#{issue['number']}"
         logger.info(f"Dispatching coding agent for {issue_key} (attempt {attempt})")
 
-        timeout = timeout_override or self.config["timeouts"]["coding_minutes"]
+        timeout = timeout_override if timeout_override is not None else self.config["timeouts"]["coding_minutes"]
         integration_branch = self.config.get("branches", {}).get("integration", "ai/dev")
         cmd = self.coding_agent.build_command(
             issue_title=issue["title"],
@@ -235,7 +236,7 @@ class Orchestrator:
             issue_number=issue["number"],
             repo=issue["repo"],
             integration_branch=integration_branch,
-            max_budget_usd=budget_override or 1.0,
+            max_budget_usd=budget_override if budget_override is not None else 1.0,
         )
         log_path = self.state.log_path(issue["repo"], issue["number"])
         log_file = open(log_path, "w")
