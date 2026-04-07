@@ -80,3 +80,14 @@ def test_notify_max_retries():
         payload = call_args[1]["json"] if "json" in call_args[1] else call_args[0][1]
         assert "3" in payload["text"]
         assert "owner/repo#42" in payload["text"]
+
+
+def test_notify_version_complete():
+    with patch("notifications.slack.requests.post") as mock_post:
+        mock_post.return_value = MagicMock(status_code=200)
+        notifier = SlackNotifier("https://hooks.slack.com/test")
+        notifier.notify_version_complete("v0.1", 5)
+
+        call_args = mock_post.call_args
+        payload = call_args[1]["json"] if "json" in call_args[1] else call_args[0][1]
+        assert payload["text"] == ":tada: Version v0.1 complete \u2014 5 issues merged to ai/dev. Ready for next batch of issues."
