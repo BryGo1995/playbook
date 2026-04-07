@@ -2,12 +2,14 @@
 
 A lightweight orchestrator that dispatches Claude Code headless agents to work on GitHub Issues. Agents code, test, and review PRs autonomously while you're away. GitHub Projects is your dashboard, Slack is your alert channel.
 
-## How It Works
+## Full Workflow
 
 ```
-You label an issue "ai-ready" on GitHub (phone, desktop, anywhere)
+/playbook:scout → Conversational GDD/PRD creation
         ↓
-Playbook picks it up (cron, every 10 min)
+/playbook:gameplan → Decompose into agent-ready issues
+        ↓
+Orchestrator picks up "ai-ready" issues (cron, every 10 min)
         ↓
 Coding agent → branches from ai/dev, implements, opens draft PR
         ↓
@@ -19,6 +21,29 @@ Auto-merge → PR merged into ai/dev
         ↓
 You review ai/dev → main in the morning
 ```
+
+## Skills
+
+Playbook ships as a Claude Code plugin with two skills. Invoke them in any repo with a `config.yaml`.
+
+### Scout (`/playbook:scout`)
+
+Guides you through creating a Game Design Document (GDD) or Product Requirements Document (PRD) via conversational interview. Supports three project types out of the box — **Game**, **Application**, **Library** — each with a domain-specific template. You can also add custom templates to `skills/scout/templates/`.
+
+- Checks `docs/design-context/` for existing notes or reference material
+- Interviews you section by section, essential sections first
+- Outputs to `docs/<project>-gdd.md` or `docs/<project>-prd.md`
+- Auto-updates `config.yaml` with the `gdd_path`
+- Re-invocable: continue building, revise sections, or start fresh
+
+### Gameplan (`/playbook:gameplan`)
+
+Reads the GDD/PRD, analyzes the repo state and project board, proposes the next version's scope, and creates conflict-free GitHub issues that agents can execute independently.
+
+- Proposes version scope based on GDD roadmap and what's already built
+- Decomposes into issues using a structured template (acceptance criteria, file scope, testing criteria)
+- Adapts conflict avoidance strategy based on `max_coding` concurrency setting
+- Creates issues on the GitHub project board with "ai-ready" status
 
 ### Label State Machine
 
@@ -75,11 +100,20 @@ playbook/
 │   └── review.py            # Review agent prompt + config
 ├── notifications/
 │   └── slack.py             # Slack incoming webhook sender
+├── .claude-plugin/
+│   └── plugin.json          # Claude Code plugin manifest
+├── skills/
+│   ├── scout/               # GDD/PRD creation skill
+│   │   ├── SKILL.md
+│   │   └── templates/       # Game GDD, App PRD, Library PRD
+│   └── gameplan/            # Version planning + issue decomposition skill
+│       ├── SKILL.md
+│       └── issue-template.md
 ├── tests/                   # 46 tests
 └── docs/
     └── superpowers/
-        ├── specs/           # Design spec
-        └── plans/           # Implementation plan
+        ├── specs/           # Design specs
+        └── plans/           # Implementation plans
 ```
 
 ### Runtime Files
@@ -122,13 +156,21 @@ Edit `config.yaml` with your repos:
 ```yaml
 repos:
   - your-username/your-repo
-  - your-username/another-repo
+
+local_paths:
+  your-username/your-repo: "/path/to/local/checkout"
+
+gdd_path: "docs/my-project-gdd.md"   # Set by /playbook:scout
+
+project:
+  owner: "your-username"
+  number: 1                           # GitHub Projects board number
 
 branches:
   integration: "ai/dev"
 
 concurrency:
-  max_coding: 2
+  max_coding: 1       # 1 = sequential (recommended), >1 = parallel
   max_testing: 1
   max_review: 1
 
