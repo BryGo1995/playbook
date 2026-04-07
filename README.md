@@ -242,6 +242,33 @@ Copy `templates/integration-pr-caller.yml` to `.github/workflows/integration-pr.
 
 > **Important:** Always merge the integration PR with a regular merge commit (not squash). Squash-merging causes `ai/dev` and `main` to diverge in history, leading to ghost conflicts on future PRs.
 
+## Version-Gated Dispatch
+
+Issues are dispatched in version order based on `[vX.Y]` tags in issue titles. The orchestrator only runs issues from the lowest incomplete version — all issues in v0.1 must reach `Done` before any v0.2 issue starts.
+
+### Version Tags
+
+- `[bootstrap]` — Runs first, alone (max 1 concurrent agent). Sets up project scaffold.
+- `[v0.1]`, `[v0.2]`, etc. — Run in order. All issues within a version run in parallel.
+- No tag — Runs after all versioned work is complete.
+
+### Rules
+
+- All issues within a version must be safe to run in parallel (no shared file writes)
+- A version is complete when all its issues are `Done`
+- Blocked issues hold the version open — resolve or remove them to proceed
+- Slack notification is sent when a version completes
+
+### Config
+
+```yaml
+versioning:
+  enabled: true                    # false to disable version gating
+  auto_create_issues: false        # reserved for future use
+  bootstrap_timeout_minutes: 120   # extended timeout for bootstrap
+  bootstrap_max_budget_usd: 5.0    # extended budget for bootstrap
+```
+
 ## Tests
 
 ```bash
