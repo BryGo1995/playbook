@@ -26,6 +26,12 @@ guardrails:
 branches:
   integration: "ai/dev"
 
+versioning:
+  enabled: true
+  auto_create_issues: false
+  bootstrap_timeout_minutes: 120
+  bootstrap_max_budget_usd: 5.0
+
 slack:
   webhook_url: "${SLACK_WEBHOOK_URL}"
 
