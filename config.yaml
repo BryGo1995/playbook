@@ -7,13 +7,16 @@ repos:
 local_paths:
   BryGo1995/paint-ballas-auto: "/home/bryang/Dev_Space/bee_gee_games/godot/paint-ballas-auto"
 
+# Path to the Game Design Document (GDD/PRD) in the target repo
+gdd_path: "docs/paint-ballas-gdd.md"
+
 project:
   owner: "BryGo1995"
   number: 9
   status_field_id: "PVTSSF_lAHOAmiy_s4BTvqizhA8ggw"
 
 concurrency:
-  max_coding: 2
+  max_coding: 1    # sequential — safe default for game dev / tightly coupled repos
   max_testing: 1
   max_review: 1
 
