@@ -40,3 +40,6 @@ class SlackNotifier:
 
     def notify_review_rejected(self, issue: str, attempt: int, max_cycles: int):
         self.send(f":leftwards_arrow_with_hook: Review agent sent {issue} back for rework (attempt {attempt}/{max_cycles})")
+
+    def notify_version_complete(self, version: str, issue_count: int):
+        self.send(f":tada: Version {version} complete \u2014 {issue_count} issues merged to ai/dev. Ready for next batch of issues.")
