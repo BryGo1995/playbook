@@ -11,6 +11,7 @@ def build_claude_command(
     cmd = [
         "claude",
         "-p",
+        "--verbose",
         "--output-format",
         output_format,
         "--allowedTools",
