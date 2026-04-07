@@ -13,7 +13,7 @@ project:
   status_field_id: "PVTSSF_lAHOAmiy_s4BTvqizhA8ggw"
 
 concurrency:
-  max_coding: 2
+  max_coding: 1    # sequential — safe default for game dev / tightly coupled repos
   max_testing: 1
   max_review: 1
 
