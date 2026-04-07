@@ -4,6 +4,9 @@
 repos:
   - BryGo1995/paint-ballas-auto
 
+# Path to the Game Design Document (GDD/PRD) in the target repo
+gdd_path: "docs/paint-ballas-gdd.md"
+
 project:
   owner: "BryGo1995"
   number: 9

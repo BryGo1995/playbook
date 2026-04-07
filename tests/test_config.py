@@ -72,6 +72,24 @@ labels:
     assert cfg["slack"]["webhook_url"] == "https://hooks.slack.com/from-env"
 
 
+def test_gdd_path_missing_returns_none(tmp_path):
+    """When gdd_path is not in the YAML, dict.get returns None."""
+    config_file = tmp_path / "config.yaml"
+    config_file.write_text("repos:\n  - owner/repo-a\n")
+    cfg = load_config(str(config_file))
+    assert cfg.get("gdd_path") is None
+
+
+def test_gdd_path_explicit_value(tmp_path):
+    """When gdd_path is set, it is accessible from the loaded config."""
+    config_file = tmp_path / "config.yaml"
+    config_file.write_text(
+        'repos:\n  - owner/repo-a\ngdd_path: "docs/my-game-gdd.md"\n'
+    )
+    cfg = load_config(str(config_file))
+    assert cfg["gdd_path"] == "docs/my-game-gdd.md"
+
+
 def test_load_config_missing_file_raises():
     with pytest.raises(FileNotFoundError):
         load_config("/nonexistent/config.yaml")
