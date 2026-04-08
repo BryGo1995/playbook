@@ -51,18 +51,22 @@ digraph plan_version {
 
 Gather all context automatically. Do not ask the user anything in this phase.
 
-1. **Read playbook config** — Find and read `config.yaml` in the playbook project
-   directory (`/home/bryang/Dev_Space/playbook/config.yaml`). Extract:
+1. **Read playbook config** — Read `playbook.yaml` in the current working
+   directory. If not found, stop and tell the user:
+   > "No `playbook.yaml` found in the current directory. Run this skill from a
+   > repo that has a `playbook.yaml`."
+
+   Extract:
+   - `repo` — the GitHub repo identifier (e.g., `BryGo1995/paint-ballas-auto`)
    - `gdd_path` (or default to `docs/*-gdd.md` glob if not set)
-   - `repos` and `local_paths` — the target repo and its local checkout path
    - `project.owner` and `project.number` — for GitHub project board queries
    - `concurrency.max_coding` — determines conflict avoidance rigor
    - `versioning` settings
 
-2. **Read the GDD/PRD** — Read the file at `gdd_path` in the target repo's local
-   checkout. Extract the roadmap/milestone table to understand version progression.
+2. **Read the GDD/PRD** — Read the file at `gdd_path` in the current working
+   directory. Extract the roadmap/milestone table to understand version progression.
 
-3. **Scan repo state** — In the target repo's local checkout:
+3. **Scan repo state** — In the current working directory:
    - List the file tree to understand what has been built
    - Run `git log --oneline -20` to see recent work
    - Identify which GDD milestones are already implemented based on existing files
