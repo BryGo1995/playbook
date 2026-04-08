@@ -52,7 +52,7 @@ digraph scout {
 Gather context automatically. Do not ask the user anything in this phase.
 
 1. **Check for an existing GDD/PRD** — two steps:
-   - Read `config.yaml` in the playbook project directory. If `gdd_path` is set,
+   - Read `playbook.yaml` in the current working directory. If `gdd_path` is set,
      that is the authoritative pointer to the existing document.
    - If `gdd_path` is absent or empty, scan `docs/` (relative to the target
      project directory, where the user invoked scout) for files matching
@@ -87,7 +87,7 @@ Gather context automatically. Do not ask the user anything in this phase.
      ```
      <!-- ARCHIVED: This GDD was replaced on YYYY-MM-DD. The active GDD is at docs/<new-file>.md -->
      ```
-     Then update `config.yaml` to clear `gdd_path`, and proceed as a fresh start.
+     Then update `playbook.yaml` to clear `gdd_path`, and proceed as a fresh start.
 
 3. **If no existing GDD/PRD is found (fresh start):**
    - Create `docs/` and `docs/design-context/` in the target project directory
@@ -176,13 +176,13 @@ completed), and proceed to Phase 4.
    The `<project-name>` is derived from what the user told you in Phase 2
    (kebab-case, lowercased).
 
-2. **Update `config.yaml`** — Set `gdd_path` to the path of the newly written
+2. **Update `playbook.yaml`** — Set `gdd_path` to the path of the newly written
    file. This is the authoritative pointer. The gameplan skill reads this path
    and never scans `docs/` independently.
 
 3. **Commit the output:**
    ```bash
-   git add docs/<project-name>-<suffix>.md config.yaml
+   git add docs/<project-name>-<suffix>.md playbook.yaml
    git commit -m "docs: add <project-name> GDD/PRD"
    ```
 
@@ -207,7 +207,7 @@ completed), and proceed to Phase 4.
 - **Each section must be actionable for gameplan.** Vague sections produce
   vague issues. Push for enough detail that a developer could read the section
   and know what to build.
-- **`gdd_path` is the single source of truth.** Always keep `config.yaml`
+- **`gdd_path` is the single source of truth.** Always keep `playbook.yaml`
   up to date. Never let `gdd_path` point to a stale or archived file.
 
 ## Red Flags
@@ -239,5 +239,5 @@ These thoughts mean STOP — you're about to skip a gate:
 - **Writing sections without showing the draft** — The user may have meant
   something different. Always show, then ask.
 - **Leaving `gdd_path` stale** — If the output file path changes (fresh start,
-  rename), update `config.yaml` immediately. The gameplan skill trusts that
+  rename), update `playbook.yaml` immediately. The gameplan skill trusts that
   pointer completely.
