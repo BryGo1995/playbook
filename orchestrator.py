@@ -225,9 +225,18 @@ class Orchestrator:
             if self.state.is_issue_active(issue_key):
                 continue
 
+            # Enforce version tag — block unversioned issues
+            issue_version = parse_version(issue["title"])
+            if issue_version is None:
+                logger.warning(f"No version tag in {issue_key}: {issue['title']!r}")
+                self.gh.update_status(issue["project_item_id"], self.statuses["blocked"])
+                self.gh.add_comment(issue["repo"], issue["number"],
+                    "[agent-orchestrator] Issue title missing version tag (e.g. `[v1.0]`). "
+                    "Add a version tag and move back to ai-ready to resume.")
+                continue
+
             # Version filter: skip issues not in the active version
             if all_issues is not None:
-                issue_version = parse_version(issue["title"])
                 if active_version is not None:
                     if issue_version != active_version:
                         continue
