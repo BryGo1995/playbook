@@ -6,7 +6,7 @@ name: Integration PR
 
 on:
   push:
-    branches: [ai/dev]  # Change if your integration branch has a different name
+    branches: [ai/dev-*]  # Triggers for version branches like ai/dev-v0.4, ai/dev-bootstrap
 
 permissions:
   contents: read
@@ -17,5 +17,5 @@ jobs:
   integration-pr:
     uses: BryGo1995/playbook/.github/workflows/integration-pr.yml@main
     with:
-      integration_branch: ai/dev   # Must match the branch above
+      integration_branch: ${{ github.ref_name }}
       base_branch: main
