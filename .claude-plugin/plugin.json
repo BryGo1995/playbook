@@ -1,8 +1,8 @@
 {
   "name": "playbook",
   "description": "Orchestrator plugin for planning and dispatching autonomous coding agents",
-  "skills": {
-    "scout": "skills/scout/SKILL.md",
-    "gameplan": "skills/gameplan/SKILL.md"
+  "version": "1.0.0",
+  "author": {
+    "name": "BryGo1995"
   }
 }
