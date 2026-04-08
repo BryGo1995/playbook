@@ -9,7 +9,7 @@ def build_claude_command(
 ) -> list[str]:
     """Build the claude -p command line."""
     cmd = [
-        "/home/bryang/.local/bin/claude",
+        "claude",
         "-p",
         "--verbose",
         "--output-format",
