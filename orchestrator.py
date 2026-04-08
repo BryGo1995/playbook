@@ -178,14 +178,12 @@ class Orchestrator:
                     self.gh.add_comment(issue["repo"], issue["number"],
                         f"[agent-orchestrator] PR #{pr_number} auto-merged into `{integration_branch}`.")
                     self.slack.notify_pr_ready(issue_key, pr_number)
-                    # Clean up local feature branch
-                    cwd = self.config.get("local_paths", {}).get(issue["repo"])
-                    if cwd:
-                        result = subprocess.run(["git", "branch", "-D", pr_branch], cwd=cwd, capture_output=True)
-                        if result.returncode == 0:
-                            logger.info(f"Deleted local branch {pr_branch}")
-                        else:
-                            logger.debug(f"Local branch {pr_branch} not found, skipping cleanup")
+                    # Clean up local feature branch (CWD is the target repo)
+                    result = subprocess.run(["git", "branch", "-D", pr_branch], capture_output=True)
+                    if result.returncode == 0:
+                        logger.info(f"Deleted local branch {pr_branch}")
+                    else:
+                        logger.debug(f"Local branch {pr_branch} not found, skipping cleanup")
                 else:
                     logger.warning(f"Merge failed for PR #{pr_number} ({issue_key})")
                     self.gh.update_status(issue["project_item_id"], self.statuses["blocked"])
@@ -331,7 +329,7 @@ class Orchestrator:
         )
         log_path = self.state.log_path(issue["repo"], issue["number"])
         log_file = open(log_path, "w")
-        cwd = self.config.get("local_paths", {}).get(issue["repo"])
+        cwd = None  # Orchestrator runs from within the target repo
         proc = subprocess.Popen(cmd, stdout=log_file, stderr=subprocess.STDOUT, cwd=cwd)
 
         self.gh.update_status(issue["project_item_id"], self.statuses["in_progress"])
@@ -359,7 +357,7 @@ class Orchestrator:
         )
         log_path = self.state.log_path(issue["repo"], issue["number"])
         log_file = open(log_path, "w")
-        cwd = self.config.get("local_paths", {}).get(issue["repo"])
+        cwd = None  # Orchestrator runs from within the target repo
         proc = subprocess.Popen(cmd, stdout=log_file, stderr=subprocess.STDOUT, cwd=cwd)
 
         self.state.add_agent(
@@ -386,7 +384,7 @@ class Orchestrator:
         )
         log_path = self.state.log_path(issue["repo"], issue["number"])
         log_file = open(log_path, "w")
-        cwd = self.config.get("local_paths", {}).get(issue["repo"])
+        cwd = None  # Orchestrator runs from within the target repo
         proc = subprocess.Popen(cmd, stdout=log_file, stderr=subprocess.STDOUT, cwd=cwd)
 
         self.state.add_agent(
@@ -401,8 +399,7 @@ class Orchestrator:
 
 
 def main():
-    config_path = os.path.join(os.path.dirname(__file__), "config.yaml")
-    config = load_config(config_path)
+    config = load_config()  # Reads playbook.yaml from CWD, merges with defaults.yaml
     orchestrator = Orchestrator(config)
     orchestrator.run()
 

@@ -9,7 +9,7 @@ from orchestrator import Orchestrator
 @pytest.fixture
 def config():
     return {
-        "repos": ["owner/repo"],
+        "repo": "owner/repo",
         "project": {
             "owner": "owner",
             "number": 1,
@@ -188,14 +188,16 @@ def test_max_retries_sets_blocked(MockGH, MockPopen, config, state_dir):
     MockPopen.assert_not_called()
 
 
+@patch("orchestrator.subprocess.run")
 @patch("orchestrator.subprocess.Popen")
 @patch("orchestrator.GitHubClient")
-def test_auto_merge_complete(MockGH, MockPopen, config, state_dir):
+def test_auto_merge_complete(MockGH, MockPopen, MockRun, config, state_dir):
     mock_gh = MockGH.return_value
     mock_issue = _mock_issue(42, "Fix bug", "Body", "item_42")
     mock_gh.fetch_issues_by_status.side_effect = lambda s: [mock_issue] if s == "ai-complete" else []
     mock_gh.find_pr_for_branch.return_value = 15
     mock_gh.merge_pr.return_value = True
+    MockRun.return_value = MagicMock(returncode=0)
 
     orch = Orchestrator.__new__(Orchestrator)
     orch.config = config
