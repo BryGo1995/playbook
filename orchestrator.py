@@ -44,6 +44,7 @@ class Orchestrator:
         if self.config.get("versioning", {}).get("enabled", False):
             all_issues = self.gh.fetch_all_project_issues()
         self._check_version_completion(all_issues)
+        self._retry_error_issues()
         self._process_ready_issues(all_issues)
         self._process_testing_issues()
         self._process_review_issues()
@@ -115,6 +116,22 @@ class Orchestrator:
         repo = agent["repo"]
         issue_number = int(issue.split("#")[1])
         project_item_id = agent.get("project_item_id")
+
+        # For coding agents, verify a PR was actually created before advancing
+        if agent["type"] == "coding":
+            pr_branch = f"ai/issue-{issue_number}"
+            pr_number = self.gh.find_pr_for_branch(repo, pr_branch)
+            if pr_number is None:
+                logger.warning(f"Coding agent exited without creating PR for {issue}")
+                self.gh.add_comment(repo, issue_number,
+                    f"[agent-orchestrator] Attempt {agent['attempt']} completed ({agent['type']} agent) "
+                    f"but no PR found on branch `{pr_branch}`. Marking as error.")
+                if project_item_id:
+                    self.gh.update_status(project_item_id, self.statuses["error"])
+                self.slack.notify_error(issue, "Coding agent exited without creating a PR")
+                self.state.remove_agent(pid)
+                return
+
         self.gh.add_comment(repo, issue_number, f"[agent-orchestrator] Attempt {agent['attempt']} completed ({agent['type']} agent).")
 
         # Advance to next status in the pipeline
@@ -138,7 +155,10 @@ class Orchestrator:
             pr_number = self.gh.find_pr_for_branch(issue["repo"], pr_branch)
 
             if pr_number is None:
-                logger.warning(f"No PR found for {issue_key} branch {pr_branch}")
+                logger.warning(f"No PR found for {issue_key} branch {pr_branch}, marking error")
+                self.gh.update_status(issue["project_item_id"], self.statuses["error"])
+                self.gh.add_comment(issue["repo"], issue["number"],
+                    f"[agent-orchestrator] No PR found on branch `{pr_branch}` at merge time. Marking as error.")
                 continue
 
             logger.info(f"Auto-merging PR #{pr_number} for {issue_key}")
@@ -160,6 +180,23 @@ class Orchestrator:
                 self.gh.update_status(issue["project_item_id"], self.statuses["error"])
                 self.slack.notify_error(issue_key, f"Merge failed: {e}")
 
+    def _retry_error_issues(self):
+        """Move ai-error issues back to ai-ready for retry (respects max_retry_cycles)."""
+        issues = self.gh.fetch_issues_by_status(self.statuses["error"])
+        max_retries = self.config["guardrails"]["max_retry_cycles"]
+        for issue in issues:
+            issue_key = f"{issue['repo']}#{issue['number']}"
+            attempt_count = self.gh.get_attempt_count(issue["repo"], issue["number"])
+            if attempt_count >= max_retries:
+                logger.info(f"Error issue {issue_key} already at max retries, marking blocked")
+                self.gh.update_status(issue["project_item_id"], self.statuses["blocked"])
+                self.gh.add_comment(issue["repo"], issue["number"],
+                    f"[agent-orchestrator] Max retry cycles ({max_retries}) reached. Marking blocked.")
+                self.slack.notify_max_retries(issue_key, max_retries)
+            else:
+                logger.info(f"Retrying error issue {issue_key} (attempt {attempt_count + 1}/{max_retries})")
+                self.gh.update_status(issue["project_item_id"], self.statuses["ready"])
+
     def _process_ready_issues(self, all_issues: list[dict] | None = None):
         """Dispatch coding agents for ai-ready issues, respecting version gating."""
         issues = self.gh.fetch_issues_by_status(self.statuses["ready"])
@@ -168,6 +205,20 @@ class Orchestrator:
 
         if all_issues is not None:
             active_version = get_active_version(all_issues)
+
+        # Check if any active-version issues are still in the pipeline (not yet merged).
+        # If so, block new dispatches to ensure fully sequential execution.
+        in_flight_statuses = {
+            self.statuses["in_progress"],
+            self.statuses["testing"],
+            self.statuses["review"],
+            self.statuses["complete"],
+        }
+        if all_issues is not None and active_version is not None:
+            for other in all_issues:
+                if parse_version(other["title"]) == active_version and other["status"] in in_flight_statuses:
+                    logger.info(f"Pipeline busy — {other['title']!r} is in {other['status']}, holding new dispatches")
+                    return
 
         for issue in issues:
             issue_key = f"{issue['repo']}#{issue['number']}"
