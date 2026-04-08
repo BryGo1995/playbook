@@ -91,6 +91,13 @@ def test_review_agent_builds_prompt():
     assert "review" in prompt.lower()
 
 
+def test_claude_command_uses_path_not_absolute():
+    """The claude binary should be resolved via PATH, not a hardcoded absolute path."""
+    cmd = build_claude_command("test prompt", ["Read", "Write"])
+    assert cmd[0] == "claude"
+    assert not cmd[0].startswith("/")
+
+
 def test_review_agent_restricted_tools():
     agent = ReviewAgent()
     cmd = agent.build_command(
