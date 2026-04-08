@@ -5,6 +5,7 @@
 
 PLAYBOOK_DIR="$(cd "$(dirname "$0")" && pwd)"
 export PYTHONPATH="$PLAYBOOK_DIR"
+export PATH="$HOME/.local/bin:$PATH"
 
 PROJECTS=(
     "/home/bryang/Dev_Space/bee_gee_games/godot/paint-ballas-auto"
