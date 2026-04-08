@@ -6,7 +6,7 @@ import sys
 from datetime import datetime, timezone
 
 from config import load_config
-from versioning import parse_version, get_active_version
+from versioning import parse_version, get_active_version, version_branch_name
 from state import StateManager
 from github_client import GitHubClient
 from agents.coding import CodingAgent
@@ -108,6 +108,14 @@ class Orchestrator:
         self.slack.notify_timeout(issue, agent["timeout_minutes"])
         self.state.remove_agent(pid)
 
+    def _get_integration_branch(self, issue_title: str) -> str:
+        """Derive the version-specific integration branch from an issue title."""
+        prefix = self.config.get("branches", {}).get("integration", "ai/dev")
+        version = parse_version(issue_title)
+        if version is None:
+            return prefix
+        return version_branch_name(version, prefix)
+
     def _handle_completion(self, agent: dict):
         """Agent process exited — clean up state and advance status."""
         pid = agent["pid"]
@@ -151,6 +159,7 @@ class Orchestrator:
         issues = self.gh.fetch_issues_by_status(self.statuses["complete"])
         for issue in issues:
             issue_key = f"{issue['repo']}#{issue['number']}"
+            integration_branch = self._get_integration_branch(issue["title"])
             pr_branch = f"ai/issue-{issue['number']}"
             pr_number = self.gh.find_pr_for_branch(issue["repo"], pr_branch)
 
@@ -167,8 +176,16 @@ class Orchestrator:
                 if success:
                     self.gh.update_status(issue["project_item_id"], self.statuses["done"])
                     self.gh.add_comment(issue["repo"], issue["number"],
-                        f"[agent-orchestrator] PR #{pr_number} auto-merged into {self.config['branches']['integration']}.")
+                        f"[agent-orchestrator] PR #{pr_number} auto-merged into `{integration_branch}`.")
                     self.slack.notify_pr_ready(issue_key, pr_number)
+                    # Clean up local feature branch
+                    cwd = self.config.get("local_paths", {}).get(issue["repo"])
+                    if cwd:
+                        result = subprocess.run(["git", "branch", "-D", pr_branch], cwd=cwd, capture_output=True)
+                        if result.returncode == 0:
+                            logger.info(f"Deleted local branch {pr_branch}")
+                        else:
+                            logger.debug(f"Local branch {pr_branch} not found, skipping cleanup")
                 else:
                     logger.warning(f"Merge failed for PR #{pr_number} ({issue_key})")
                     self.gh.update_status(issue["project_item_id"], self.statuses["blocked"])
@@ -261,12 +278,13 @@ class Orchestrator:
                 logger.info(f"Coding concurrency limit reached ({current_coding}/{max_coding}), skipping {issue_key}")
                 break
 
+            integration_branch = self._get_integration_branch(issue["title"])
             if is_bootstrap:
                 timeout = self.config.get("versioning", {}).get("bootstrap_timeout_minutes", 120)
                 budget = self.config.get("versioning", {}).get("bootstrap_max_budget_usd", 5.0)
-                self._dispatch_coding(issue, attempt_count + 1, timeout_override=timeout, budget_override=budget)
+                self._dispatch_coding(issue, attempt_count + 1, timeout_override=timeout, budget_override=budget, integration_branch=integration_branch)
             else:
-                self._dispatch_coding(issue, attempt_count + 1)
+                self._dispatch_coding(issue, attempt_count + 1, integration_branch=integration_branch)
 
     def _process_testing_issues(self):
         """Dispatch testing agents for ai-testing issues."""
@@ -296,19 +314,20 @@ class Orchestrator:
 
             self._dispatch_review(issue)
 
-    def _dispatch_coding(self, issue: dict, attempt: int, timeout_override: int | None = None, budget_override: float | None = None):
+    def _dispatch_coding(self, issue: dict, attempt: int, timeout_override: int | None = None, budget_override: float | None = None, integration_branch: str | None = None):
         issue_key = f"{issue['repo']}#{issue['number']}"
         logger.info(f"Dispatching coding agent for {issue_key} (attempt {attempt})")
 
         timeout = timeout_override if timeout_override is not None else self.config["timeouts"]["coding_minutes"]
-        integration_branch = self.config.get("branches", {}).get("integration", "ai/dev")
+        if integration_branch is None:
+            integration_branch = self._get_integration_branch(issue["title"])
         cmd = self.coding_agent.build_command(
             issue_title=issue["title"],
             issue_body=issue["body"] or "",
             issue_number=issue["number"],
             repo=issue["repo"],
             integration_branch=integration_branch,
-            max_budget_usd=budget_override if budget_override is not None else 1.0,
+            max_budget_usd=budget_override if budget_override is not None else 2.0,
         )
         log_path = self.state.log_path(issue["repo"], issue["number"])
         log_file = open(log_path, "w")

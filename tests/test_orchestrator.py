@@ -53,7 +53,7 @@ def _mock_issue(number, title, body, project_item_id="item_1"):
 @patch("orchestrator.GitHubClient")
 def test_dispatch_coding_agent(MockGH, MockPopen, config, state_dir):
     mock_gh = MockGH.return_value
-    mock_issue = _mock_issue(42, "Fix bug", "Body\n## Acceptance Criteria\n- [ ] works")
+    mock_issue = _mock_issue(42, "[v0.1] Fix bug", "Body\n## Acceptance Criteria\n- [ ] works")
     mock_gh.fetch_issues_by_status.side_effect = lambda s: [mock_issue] if s == "ai-ready" else []
     mock_gh.get_attempt_count.return_value = 0
 

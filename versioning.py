@@ -15,6 +15,16 @@ def parse_version(title: str) -> tuple[int, int] | None:
     return None
 
 
+def version_branch_name(version: tuple[int, int], prefix: str = "ai/dev") -> str:
+    """Return the integration branch name for a version.
+
+    Examples: (0, 0) → 'ai/dev-bootstrap', (0, 4) → 'ai/dev-v0.4'
+    """
+    if version == (0, 0):
+        return f"{prefix}-bootstrap"
+    return f"{prefix}-v{version[0]}.{version[1]}"
+
+
 def get_active_version(issues: list[dict]) -> tuple[int, int] | None:
     """Determine the lowest incomplete version from a list of issues.
 
