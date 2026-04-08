@@ -10,7 +10,7 @@
   "plugins": [
     {
       "name": "playbook",
-      "source": ".",
+      "source": "./",
       "description": "Scout (GDD/PRD creation) and Gameplan (version planning/issue decomposition) skills",
       "version": "1.0.0"
     }
