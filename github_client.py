@@ -283,21 +283,57 @@ class GitHubClient:
         )
 
     def get_attempt_count(self, repo_name: str, issue_number: int) -> int:
-        """Count orchestrator attempt comments on an issue."""
+        """Count orchestrator coding attempt comments on an issue."""
         owner, repo = repo_name.split("/")
         comments = self._rest_get(f"/repos/{owner}/{repo}/issues/{issue_number}/comments")
         return sum(
             1
             for c in comments
             if c["body"].startswith(ORCHESTRATOR_TAG) and "Attempt" in c["body"] and "completed" in c["body"]
+            and "coding agent" in c["body"]
         )
 
     # --- PR operations (REST API) ---
+
+    def _get_pr_node_id(self, repo_name: str, pr_number: int) -> str | None:
+        """Get the GraphQL node ID for a pull request."""
+        owner, repo = repo_name.split("/")
+        data = self._graphql(
+            """
+            query($owner: String!, $repo: String!, $number: Int!) {
+                repository(owner: $owner, name: $repo) {
+                    pullRequest(number: $number) {
+                        id
+                    }
+                }
+            }
+            """,
+            {"owner": owner, "repo": repo, "number": pr_number},
+        )
+        pr = data.get("repository", {}).get("pullRequest")
+        return pr["id"] if pr else None
+
+    def _mark_ready_for_review(self, pr_node_id: str):
+        """Mark a draft PR as ready for review using GraphQL."""
+        self._graphql(
+            """
+            mutation($prId: ID!) {
+                markPullRequestReadyForReview(input: { pullRequestId: $prId }) {
+                    pullRequest { isDraft }
+                }
+            }
+            """,
+            {"prId": pr_node_id},
+        )
 
     def merge_pr(self, repo_name: str, pr_number: int, merge_method: str = "squash") -> bool:
         """Merge a pull request. Returns True on success, False on failure."""
         owner, repo = repo_name.split("/")
         try:
+            # Mark PR as ready for review (undraft) before merging
+            pr_node_id = self._get_pr_node_id(repo_name, pr_number)
+            if pr_node_id:
+                self._mark_ready_for_review(pr_node_id)
             resp = requests.put(
                 f"https://api.github.com/repos/{owner}/{repo}/pulls/{pr_number}/merge",
                 json={"merge_method": merge_method},

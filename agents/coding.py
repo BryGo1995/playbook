@@ -9,7 +9,7 @@ CODING_PROMPT = """You are a coding agent working on GitHub issue {repo}#{issue_
 
 ## Instructions
 
-1. Fetch the latest `{integration_branch}` branch and create a feature branch named `ai/issue-{issue_number}` from it.
+1. Start from a clean state: run `git fetch origin && git checkout {integration_branch} && git reset --hard origin/{integration_branch}`. Delete any existing local branch `ai/issue-{issue_number}` if present (`git branch -D ai/issue-{issue_number}` — ignore errors). Then create a fresh feature branch: `git checkout -b ai/issue-{issue_number}`.
 2. Implement the work described in the issue, following the checklist and acceptance criteria.
 3. Write tests before implementation. Run tests to verify they fail, then implement.
 4. Run all tests to ensure they pass.
@@ -42,7 +42,7 @@ class CodingAgent:
         issue_number: int,
         repo: str,
         integration_branch: str = "ai/dev",
-        max_budget_usd: float = 1.0,
+        max_budget_usd: float = 2.0,
     ) -> list[str]:
         prompt = self.build_prompt(issue_title, issue_body, issue_number, repo, integration_branch)
         return build_claude_command(
