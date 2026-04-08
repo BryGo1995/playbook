@@ -7,7 +7,9 @@ from datetime import datetime, timezone
 class StateManager:
     """Manages agent state in a local JSON file."""
 
-    def __init__(self, base_dir: str = os.path.expanduser("~/.agent-orchestrator")):
+    def __init__(self, base_dir: str | None = None):
+        if base_dir is None:
+            base_dir = os.path.join(os.getcwd(), ".playbook")
         self.base_dir = base_dir
         self.state_file = os.path.join(base_dir, "state.json")
         self.logs_dir = os.path.join(base_dir, "logs")
