@@ -72,3 +72,12 @@ def test_is_issue_active(state_dir):
 def test_logs_directory_created(state_dir):
     StateManager(state_dir)
     assert os.path.isdir(os.path.join(state_dir, "logs"))
+
+
+def test_default_base_dir_is_cwd_playbook(tmp_path, monkeypatch):
+    """StateManager defaults to .playbook/ in the current working directory."""
+    monkeypatch.chdir(tmp_path)
+    sm = StateManager()
+    expected = os.path.join(str(tmp_path), ".playbook")
+    assert sm.base_dir == expected
+    assert os.path.isdir(os.path.join(expected, "logs"))
