@@ -1,0 +1,18 @@
+{
+  "name": "playbook",
+  "owner": {
+    "name": "BryGo1995"
+  },
+  "metadata": {
+    "description": "Orchestrator plugin for planning and dispatching autonomous coding agents",
+    "version": "1.0.0"
+  },
+  "plugins": [
+    {
+      "name": "playbook",
+      "source": ".",
+      "description": "Scout (GDD/PRD creation) and Gameplan (version planning/issue decomposition) skills",
+      "version": "1.0.0"
+    }
+  ]
+}
