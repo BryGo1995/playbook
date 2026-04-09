@@ -396,7 +396,9 @@ that will eventually exist — even if they don't ship until later versions.
   - [ ] Entry point runs and produces minimal output
   - [ ] Base configuration files are in place
   - [ ] README.md exists with project description, tech stack, setup
-    instructions, and project structure overview — all derived from the GDD
+    instructions, and project structure overview — all derived from the GDD.
+    Write the README last, after the rest of the skeleton is built, so it
+    accurately reflects what was actually created
 - **Scope:** List all files and directories to be created. Include directories
   for components that won't be built until later versions — the skeleton
   should accommodate the full roadmap.
