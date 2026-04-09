@@ -395,6 +395,8 @@ that will eventually exist — even if they don't ship until later versions.
   - [ ] Folder structure matches GDD architecture
   - [ ] Entry point runs and produces minimal output
   - [ ] Base configuration files are in place
+  - [ ] README.md exists with project description, tech stack, setup
+    instructions, and project structure overview — all derived from the GDD
 - **Scope:** List all files and directories to be created. Include directories
   for components that won't be built until later versions — the skeleton
   should accommodate the full roadmap.
@@ -411,6 +413,9 @@ that will eventually exist — even if they don't ship until later versions.
   - [ ] Tech stack matches GDD technology section
   - [ ] No placeholder or stub files — everything created should be
     functional
+  - [ ] README.md accurately reflects the GDD — project description, tech
+    stack, setup/run instructions, and folder structure are all present
+    and correct
 - **Definition of Done:** The project runs, produces minimal output, and the
   folder structure follows industry conventions and accommodates every system
   component in the GDD roadmap.
