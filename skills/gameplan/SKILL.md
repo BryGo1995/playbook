@@ -27,6 +27,7 @@ digraph plan_version {
     "Project board\nconfigured?" [shape=diamond];
     "Create project\n& statuses" [shape=box];
     "Phase 2:\nVersion Proposal" [shape=box];
+    "Bootstrap\nneeded?" [shape=diamond];
     "User confirms\npriority?" [shape=diamond];
     "GDD changes\nneeded?" [shape=diamond];
     "Phase 3:\nGDD Updates" [shape=box];
@@ -39,7 +40,9 @@ digraph plan_version {
     "Project board\nconfigured?" -> "Create project\n& statuses" [label="no"];
     "Project board\nconfigured?" -> "Phase 2:\nVersion Proposal" [label="yes"];
     "Create project\n& statuses" -> "Phase 2:\nVersion Proposal";
-    "Phase 2:\nVersion Proposal" -> "User confirms\npriority?";
+    "Phase 2:\nVersion Proposal" -> "Bootstrap\nneeded?" [label="fresh project"];
+    "Bootstrap\nneeded?" -> "Phase 4:\nIssue Decomposition" [label="yes, bootstrap"];
+    "Phase 2:\nVersion Proposal" -> "User confirms\npriority?" [label="existing project"];
     "User confirms\npriority?" -> "Phase 2:\nVersion Proposal" [label="adjust"];
     "User confirms\npriority?" -> "GDD changes\nneeded?" [label="confirmed"];
     "GDD changes\nneeded?" -> "Phase 3:\nGDD Updates" [label="yes"];
