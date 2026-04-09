@@ -5,14 +5,14 @@
   },
   "metadata": {
     "description": "Orchestrator plugin for planning and dispatching autonomous coding agents",
-    "version": "1.0.0"
+    "version": "1.1.0"
   },
   "plugins": [
     {
       "name": "playbook",
       "source": "./",
       "description": "Scout (GDD/PRD creation), Gameplan (version planning/issue decomposition), and Film Room (post-agent review/fix) skills",
-      "version": "1.0.0"
+      "version": "1.1.0"
     }
   ]
 }
