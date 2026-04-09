@@ -303,19 +303,42 @@ from `issue-template.md` in this skill directory for the required structure.
 If the user chose bootstrap in Phase 2, create a single `[bootstrap]` issue
 instead of decomposing into multiple versioned issues.
 
-**Derive the bootstrap scope entirely from the GDD:**
+**Derive the bootstrap scope from the ENTIRE GDD roadmap:**
 
-1. Read the GDD's technology/platform sections to identify:
-   - Language, framework, or engine
+Bootstrap sets up the skeleton for the whole project, not just the first few
+versions. Scan every version in the roadmap to identify all system components
+that will eventually exist — even if they don't ship until later versions.
+
+1. Read the **full GDD roadmap** (all versions, not just the next one) to
+   identify every system component that will be built:
+   - Backend services, APIs, databases
+   - Frontend applications (web, mobile, desktop)
+   - Game engine projects, scenes, assets pipelines
+   - Infrastructure, deployment, CI/CD
+   - Shared libraries, SDKs, packages
+
+   If a component appears in any version (even v0.7 or later), the bootstrap
+   skeleton must account for it. The folder structure should have a home for
+   every major component from day one.
+
+2. Read the GDD's technology/platform sections to identify:
+   - Language, framework, or engine for each component
    - Dependencies and package manager
-   - Build tooling
+   - Build tooling and monorepo structure (if applicable)
 
-2. Read the GDD's architecture sections to identify:
-   - Folder structure and directory layout
-   - Core modules or components
-   - Configuration approach
+3. For each identified technology, use **industry-standard folder structures
+   and conventions**:
+   - Next.js → `app/`, `components/`, `lib/`, `public/`, etc.
+   - Godot → `scenes/`, `scripts/`, `assets/`, `shaders/`, etc.
+   - Python/FastAPI → `src/`, `tests/`, `alembic/`, etc.
+   - React Native → follow Expo or bare workflow conventions
+   - Monorepos → `packages/` or `apps/` with shared config at root
 
-3. Read the GDD's entry point / starting state to identify:
+   Do not invent custom structures. Follow what the community and official
+   docs recommend for each framework/engine. If unsure, state the convention
+   you're following and why.
+
+4. Read the GDD's entry point / starting state to identify:
    - The minimal runnable artifact (main scene, app shell, CLI entry point)
    - What "hello world" looks like for this project
 
@@ -329,20 +352,25 @@ instead of decomposing into multiple versioned issues.
   - [ ] Folder structure matches GDD architecture
   - [ ] Entry point runs and produces minimal output
   - [ ] Base configuration files are in place
-- **Scope:** List all files and directories to be created, derived from the
-  GDD architecture.
+- **Scope:** List all files and directories to be created. Include directories
+  for components that won't be built until later versions — the skeleton
+  should accommodate the full roadmap.
 - **Dependencies:** None — this is the first issue.
 - **Testing criteria:**
   - [ ] Project builds/compiles without errors
   - [ ] Entry point executes and produces expected minimal output
   - [ ] All configuration files are valid
 - **Review criteria:**
-  - [ ] Folder structure matches GDD architecture section
+  - [ ] Folder structure accounts for all system components across the full
+    GDD roadmap, not just the first version
+  - [ ] Each technology component follows its industry-standard folder
+    conventions (e.g., Next.js uses `app/`, Godot uses `scenes/`)
   - [ ] Tech stack matches GDD technology section
   - [ ] No placeholder or stub files — everything created should be
     functional
 - **Definition of Done:** The project runs, produces minimal output, and the
-  folder structure matches the GDD architecture.
+  folder structure follows industry conventions and accommodates every system
+  component in the GDD roadmap.
 
 Present the bootstrap issue to the user for approval, then proceed to
 Phase 5 (Issue Creation).
