@@ -11,7 +11,7 @@
     {
       "name": "playbook",
       "source": "./",
-      "description": "Scout (GDD/PRD creation) and Gameplan (version planning/issue decomposition) skills",
+      "description": "Scout (GDD/PRD creation), Gameplan (version planning/issue decomposition), and Film Room (post-agent review/fix) skills",
       "version": "1.0.0"
     }
   ]
