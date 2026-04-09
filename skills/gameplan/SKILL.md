@@ -71,6 +71,8 @@ Gather all context automatically. Do not ask the user anything in this phase.
    - `project.owner` and `project.number` — for GitHub project board queries
    - `concurrency.max_coding` — determines conflict avoidance rigor
    - `versioning` settings
+   - `orchestrator_dir` — path to the playbook orchestrator repo (optional,
+     used for auto-registration in Phase 5)
 
 1b. **Check project board config** — After reading `playbook.yaml`, check if
     `project.number` and `project.status_field_id` are present. If either is
@@ -470,6 +472,42 @@ Once the user approves the full issue set:
    > - #17: [v0.3] Add FOV visual overlay shader
    >
    > All set to "ai-ready". The orchestrator will pick them up on the next cycle.
+
+4. **Register with orchestrator** — Check if `orchestrator_dir` is set in
+   `playbook.yaml`. If it is:
+
+   a. Read `run-all.sh` in that directory.
+   b. Check if the current project directory is already in the `PROJECTS`
+      array.
+   c. If not, add it:
+      - Find the `PROJECTS=(` block in `run-all.sh`
+      - Append the current working directory as a new entry before the
+        closing `)`
+      - Example — adding `/home/user/projects/snowie`:
+        ```bash
+        PROJECTS=(
+            "/home/user/projects/paint-ballas"
+            "/home/user/projects/snowie"
+        )
+        ```
+   d. Commit the change:
+      ```bash
+      cd <orchestrator_dir>
+      git add run-all.sh
+      git commit -m "feat: register <project-name> with orchestrator"
+      git push origin main
+      cd <project_dir>
+      ```
+   e. Confirm to the user:
+      > "Registered this project with the orchestrator at
+      > `<orchestrator_dir>`. It will be included in the next orchestrator
+      > run."
+
+   If `orchestrator_dir` is not set in `playbook.yaml`, skip this step and
+   tell the user:
+   > "To have the orchestrator automatically pick up these issues, add
+   > `orchestrator_dir: /path/to/playbook` to your `playbook.yaml` and
+   > add this project directory to `run-all.sh`."
 
 ## Red Flags
 
