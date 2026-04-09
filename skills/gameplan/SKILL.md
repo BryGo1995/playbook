@@ -213,13 +213,21 @@ Gather all context automatically. Do not ask the user anything in this phase.
              base_branch: main
        ```
 
-    i. Commit:
+    i. Enable GitHub Actions to create pull requests on the repo:
+       ```bash
+       gh api repos/<owner>/<repo>/actions/permissions/workflow -X PUT \
+         --input - <<'EOF'
+       {"default_workflow_permissions": "write", "can_approve_pull_request_reviews": true}
+       EOF
+       ```
+
+    j. Commit:
        ```bash
        git add playbook.yaml .github/workflows/integration-pr.yml
        git commit -m "chore: configure GitHub Project board and integration workflow"
        ```
 
-    j. Confirm to the user:
+    k. Confirm to the user:
        > "GitHub Project **My New Game** created and configured with playbook
        > statuses. Integration PR workflow installed. Continuing with version
        > planning."
