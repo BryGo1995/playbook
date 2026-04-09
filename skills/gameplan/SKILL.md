@@ -295,6 +295,58 @@ canonical GDD — never from stale requirements.
 Decompose the version milestone into individual issues. Read the issue template
 from `issue-template.md` in this skill directory for the required structure.
 
+### Bootstrap Mode
+
+If the user chose bootstrap in Phase 2, create a single `[bootstrap]` issue
+instead of decomposing into multiple versioned issues.
+
+**Derive the bootstrap scope entirely from the GDD:**
+
+1. Read the GDD's technology/platform sections to identify:
+   - Language, framework, or engine
+   - Dependencies and package manager
+   - Build tooling
+
+2. Read the GDD's architecture sections to identify:
+   - Folder structure and directory layout
+   - Core modules or components
+   - Configuration approach
+
+3. Read the GDD's entry point / starting state to identify:
+   - The minimal runnable artifact (main scene, app shell, CLI entry point)
+   - What "hello world" looks like for this project
+
+**Compose a single issue using the template from `issue-template.md`:**
+
+- **Title:** `[bootstrap] Project skeleton setup`
+- **Overview:** Sets up the full project skeleton from an empty repo to a
+  working runnable state.
+- **Acceptance criteria:**
+  - [ ] All dependencies install cleanly
+  - [ ] Folder structure matches GDD architecture
+  - [ ] Entry point runs and produces minimal output
+  - [ ] Base configuration files are in place
+- **Scope:** List all files and directories to be created, derived from the
+  GDD architecture.
+- **Dependencies:** None — this is the first issue.
+- **Testing criteria:**
+  - [ ] Project builds/compiles without errors
+  - [ ] Entry point executes and produces expected minimal output
+  - [ ] All configuration files are valid
+- **Review criteria:**
+  - [ ] Folder structure matches GDD architecture section
+  - [ ] Tech stack matches GDD technology section
+  - [ ] No placeholder or stub files — everything created should be
+    functional
+- **Definition of Done:** The project runs, produces minimal output, and the
+  folder structure matches the GDD architecture.
+
+Present the bootstrap issue to the user for approval, then proceed to
+Phase 5 (Issue Creation).
+
+**Do not apply the decomposition rules below** — they are for multi-issue
+versioned work. Bootstrap is always a single issue.
+
 ### Decomposition Rules
 
 1. **Each issue must be independently executable** — A coding agent should be able
