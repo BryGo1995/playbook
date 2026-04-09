@@ -67,8 +67,10 @@ Phase 2: Wrap-up (user triggers)
      > a repo that has a `playbook.yaml`."
    - Extract `repo`, `project.owner`, and `project.number`.
    - Query the project board via `gh project item-list`.
-   - Find the most recently completed version — all issues in `Done` or
-     `ai-complete` status.
+   - Find the highest completed version — the version with the largest
+     `(major, minor)` tuple where all issues are in `Done` or `ai-complete`
+     status. If multiple versions are fully complete, the highest one is
+     the most recent agent work and the most likely review target.
    - Derive the branch name using the existing `version_branch_name()`
      convention (e.g., `ai/dev-v0.3`).
 4. If no completed version is found, stop with an error:
