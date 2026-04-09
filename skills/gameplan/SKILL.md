@@ -216,6 +216,16 @@ Gather all context automatically. Do not ask the user anything in this phase.
    - What already exists in the repo
    - What the next version number should be
 
+6. **Check if bootstrap is needed** — Bootstrap is needed when ALL of these
+   are true:
+   - The project board has no existing issues (empty board)
+   - The repo has no meaningful source code (only `playbook.yaml`, GDD/PRD,
+     docs, and config files — no application code)
+   - No `[bootstrap]` issue exists on the board (not even a completed one)
+
+   If all three conditions are met, flag this as a bootstrap-needed project.
+   If any condition is false, proceed with normal version planning.
+
 ## Phase 2 — Version Proposal
 
 Present your findings to the user and get confirmation.
