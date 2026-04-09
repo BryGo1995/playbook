@@ -187,15 +187,42 @@ Gather all context automatically. Do not ask the user anything in this phase.
        `playbook.yaml`. Do not overwrite other fields (like `repo` and
        `gdd_path` which scout already set).
 
-    h. Commit:
-       ```bash
-       git add playbook.yaml
-       git commit -m "chore: configure GitHub Project board"
+    h. Set up the integration PR workflow. Check if
+       `.github/workflows/integration-pr.yml` exists in the project repo.
+       If not, create it from the caller template at
+       `templates/integration-pr-caller.yml` in the orchestrator repo
+       (at `orchestrator_dir` from `playbook.yaml`, if set). If
+       `orchestrator_dir` is not set, write the file directly:
+       ```yaml
+       name: Integration PR
+
+       on:
+         push:
+           branches: [ai/dev-*]
+
+       permissions:
+         contents: read
+         pull-requests: write
+         issues: read
+
+       jobs:
+         integration-pr:
+           uses: BryGo1995/playbook/.github/workflows/integration-pr.yml@main
+           with:
+             integration_branch: ${{ github.ref_name }}
+             base_branch: main
        ```
 
-    i. Confirm to the user:
+    i. Commit:
+       ```bash
+       git add playbook.yaml .github/workflows/integration-pr.yml
+       git commit -m "chore: configure GitHub Project board and integration workflow"
+       ```
+
+    j. Confirm to the user:
        > "GitHub Project **My New Game** created and configured with playbook
-       > statuses. Continuing with version planning."
+       > statuses. Integration PR workflow installed. Continuing with version
+       > planning."
 
     **If project board is already configured:** Skip this step and continue
     to Step 2 (Read the GDD/PRD).
