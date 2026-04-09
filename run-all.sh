@@ -9,6 +9,7 @@ export PATH="$HOME/.local/bin:$PATH"
 
 PROJECTS=(
     "/home/bryang/Dev_Space/bee_gee_games/godot/paint-ballas-auto"
+    "/home/bryang/Dev_Space/ml_projects/snowie"
 )
 
 for dir in "${PROJECTS[@]}"; do
