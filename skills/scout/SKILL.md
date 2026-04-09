@@ -28,6 +28,11 @@ happens automatically at the start of every session.
 
 ```dot
 digraph scout {
+    "Step 0:\nPrereqs &\nConfig Check" [shape=box];
+    "Git repo with\nremote?" [shape=diamond];
+    "Stop:\nprereqs message" [shape=box, style=filled, fillcolor=lightyellow];
+    "playbook.yaml\nexists?" [shape=diamond];
+    "Create config\n& confirm repo" [shape=box];
     "Phase 1:\nSetup & Context\nGathering" [shape=box];
     "Existing GDD/PRD\nfound?" [shape=diamond];
     "Re-entry:\nA/B/C options" [shape=box];
@@ -36,6 +41,12 @@ digraph scout {
     "Phase 4:\nOutput & Config" [shape=box];
     "Done" [shape=doublecircle];
 
+    "Step 0:\nPrereqs &\nConfig Check" -> "Git repo with\nremote?";
+    "Git repo with\nremote?" -> "Stop:\nprereqs message" [label="no"];
+    "Git repo with\nremote?" -> "playbook.yaml\nexists?" [label="yes"];
+    "playbook.yaml\nexists?" -> "Create config\n& confirm repo" [label="no"];
+    "playbook.yaml\nexists?" -> "Phase 1:\nSetup & Context\nGathering" [label="yes"];
+    "Create config\n& confirm repo" -> "Phase 1:\nSetup & Context\nGathering";
     "Phase 1:\nSetup & Context\nGathering" -> "Existing GDD/PRD\nfound?";
     "Existing GDD/PRD\nfound?" -> "Re-entry:\nA/B/C options" [label="yes"];
     "Existing GDD/PRD\nfound?" -> "Phase 2:\nProject Type\n& Vision" [label="no"];
@@ -46,6 +57,62 @@ digraph scout {
     "Phase 4:\nOutput & Config" -> "Done";
 }
 ```
+
+## Step 0 — Prerequisites & Config Check
+
+Before gathering context, verify the environment can support playbook.
+
+### Prerequisite check
+
+1. Verify this is a git repo:
+   ```bash
+   git rev-parse --git-dir
+   ```
+
+2. Verify a remote exists:
+   ```bash
+   git remote get-url origin
+   ```
+
+3. If either check fails, stop and tell the user:
+   > **Prerequisites for Playbook:**
+   > 1. A local git repo with a GitHub remote (`git remote -v` to check)
+   > 2. A GitHub repository (create one with `gh repo create` if needed)
+   >
+   > Once your repo and remote are ready, run `/playbook:scout` again.
+
+### Config creation
+
+If prerequisites pass but no `playbook.yaml` exists in the current directory:
+
+1. Parse the repo identifier from the remote URL:
+   ```bash
+   git remote get-url origin
+   ```
+   - `git@github.com:BryGo1995/my-new-game.git` → `BryGo1995/my-new-game`
+   - `https://github.com/BryGo1995/my-new-game.git` → `BryGo1995/my-new-game`
+
+2. Confirm with the user:
+   > "No `playbook.yaml` found. I'll create one for this project.
+   > Repo detected as **BryGo1995/my-new-game** — is that right?"
+
+   Wait for confirmation. If the user corrects the repo name, use their value.
+
+3. Create `playbook.yaml` with:
+   ```yaml
+   repo: BryGo1995/my-new-game
+   ```
+
+4. Commit:
+   ```bash
+   git add playbook.yaml
+   git commit -m "chore: initialize playbook.yaml"
+   ```
+
+5. Continue to Phase 1.
+
+If `playbook.yaml` already exists, skip this step entirely and proceed to
+Phase 1.
 
 ## Phase 1 — Setup & Context Gathering
 
