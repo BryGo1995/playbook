@@ -24,6 +24,8 @@ board without their explicit go-ahead.
 ```dot
 digraph plan_version {
     "Phase 1:\nContext Gathering" [shape=box];
+    "Project board\nconfigured?" [shape=diamond];
+    "Create project\n& statuses" [shape=box];
     "Phase 2:\nVersion Proposal" [shape=box];
     "User confirms\npriority?" [shape=diamond];
     "GDD changes\nneeded?" [shape=diamond];
@@ -33,7 +35,10 @@ digraph plan_version {
     "Phase 5:\nIssue Creation" [shape=box];
     "Done" [shape=doublecircle];
 
-    "Phase 1:\nContext Gathering" -> "Phase 2:\nVersion Proposal";
+    "Phase 1:\nContext Gathering" -> "Project board\nconfigured?";
+    "Project board\nconfigured?" -> "Create project\n& statuses" [label="no"];
+    "Project board\nconfigured?" -> "Phase 2:\nVersion Proposal" [label="yes"];
+    "Create project\n& statuses" -> "Phase 2:\nVersion Proposal";
     "Phase 2:\nVersion Proposal" -> "User confirms\npriority?";
     "User confirms\npriority?" -> "Phase 2:\nVersion Proposal" [label="adjust"];
     "User confirms\npriority?" -> "GDD changes\nneeded?" [label="confirmed"];
@@ -53,8 +58,9 @@ Gather all context automatically. Do not ask the user anything in this phase.
 
 1. **Read playbook config** — Read `playbook.yaml` in the current working
    directory. If not found, stop and tell the user:
-   > "No `playbook.yaml` found in the current directory. Run this skill from a
-   > repo that has a `playbook.yaml`."
+   > "No `playbook.yaml` found in the current directory. Run
+   > `/playbook:scout` first to create your GDD/PRD and initialize the
+   > config."
 
    Extract:
    - `repo` — the GitHub repo identifier (e.g., `BryGo1995/paint-ballas-auto`)
@@ -62,6 +68,132 @@ Gather all context automatically. Do not ask the user anything in this phase.
    - `project.owner` and `project.number` — for GitHub project board queries
    - `concurrency.max_coding` — determines conflict avoidance rigor
    - `versioning` settings
+
+1b. **Check project board config** — After reading `playbook.yaml`, check if
+    `project.number` and `project.status_field_id` are present. If either is
+    missing, the GitHub Project hasn't been set up yet.
+
+    **If project board is not configured:**
+
+    a. Derive a project name from the repo:
+       `BryGo1995/my-new-game` → `My New Game`
+       (split on `/`, take the repo name, replace `-` with spaces, title case)
+
+    b. Confirm with the user:
+       > "No GitHub Project board configured for this repo. I'll create one
+       > to track agent work.
+       >
+       > Project name: **My New Game** — want to change it?"
+
+       Wait for confirmation. If the user provides a different name, use it.
+
+    c. Create the project and link the repo:
+       ```bash
+       gh project create --owner <owner> --title "<project name>" --format json
+       ```
+       Extract the project number from the JSON response.
+
+       ```bash
+       gh project link <project_number> --owner <owner> --repo <owner>/<repo>
+       ```
+
+    d. Get the project ID and Status field ID via GraphQL:
+       ```bash
+       gh api graphql -f query='
+         query($owner: String!, $number: Int!) {
+           user(login: $owner) {
+             projectV2(number: $number) {
+               id
+               field(name: "Status") {
+                 ... on ProjectV2SingleSelectField {
+                   id
+                   options {
+                     id
+                     name
+                   }
+                 }
+               }
+             }
+           }
+         }
+       ' -f owner="<owner>" -F number=<project_number>
+       ```
+       Extract `project_id`, `status_field_id`, and the list of existing
+       status options (new projects come with `Todo`, `In Progress`, `Done`).
+
+    e. Add playbook status options. For each status that doesn't already exist
+       (`Backlog`, `ai-ready`, `ai-in-progress`, `ai-testing`, `ai-review`,
+       `ai-complete`, `ai-blocked`, `ai-error`, `Done`), create it:
+       ```bash
+       gh api graphql -f query='
+         mutation($projectId: ID!, $fieldId: ID!, $name: String!) {
+           createProjectV2FieldOption(input: {
+             projectId: $projectId
+             fieldId: $fieldId
+             name: $name
+           }) {
+             projectV2Field {
+               ... on ProjectV2SingleSelectField {
+                 options { id name }
+               }
+             }
+           }
+         }
+       ' -f projectId="<project_id>" -f fieldId="<status_field_id>" \
+         -f name="<status_name>"
+       ```
+
+       Skip `Done` — it already exists on new projects.
+
+    f. Remove default statuses that playbook doesn't use. Delete `Todo` and
+       `In Progress`:
+       ```bash
+       gh api graphql -f query='
+         mutation($projectId: ID!, $fieldId: ID!, $optionId: String!) {
+           deleteProjectV2FieldOption(input: {
+             projectId: $projectId
+             fieldId: $fieldId
+             optionId: $optionId
+           }) {
+             projectV2Field {
+               ... on ProjectV2SingleSelectField {
+                 options { id name }
+               }
+             }
+           }
+         }
+       ' -f projectId="<project_id>" -f fieldId="<status_field_id>" \
+         -f optionId="<option_id>"
+       ```
+
+       Use the option IDs retrieved in step (d) to identify `Todo` and
+       `In Progress`.
+
+    g. Update `playbook.yaml` with the project config:
+       ```yaml
+       repo: BryGo1995/my-new-game
+       project:
+         owner: BryGo1995
+         number: 3
+         status_field_id: "PVTSSF_lAHOAmiy..."
+       ```
+
+       Use the Edit tool to add the `project:` block to the existing
+       `playbook.yaml`. Do not overwrite other fields (like `repo` and
+       `gdd_path` which scout already set).
+
+    h. Commit:
+       ```bash
+       git add playbook.yaml
+       git commit -m "chore: configure GitHub Project board"
+       ```
+
+    i. Confirm to the user:
+       > "GitHub Project **My New Game** created and configured with playbook
+       > statuses. Continuing with version planning."
+
+    **If project board is already configured:** Skip this step and continue
+    to Step 2 (Read the GDD/PRD).
 
 2. **Read the GDD/PRD** — Read the file at `gdd_path` in the current working
    directory. Extract the roadmap/milestone table to understand version progression.
