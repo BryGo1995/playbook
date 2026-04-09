@@ -213,11 +213,17 @@ Gather all context automatically. Do not ask the user anything in this phase.
              base_branch: main
        ```
 
-    i. Enable GitHub Actions to create pull requests on the repo:
+    i. Configure repo settings for the orchestrator workflow:
        ```bash
+       # Allow GitHub Actions to create pull requests
        gh api repos/<owner>/<repo>/actions/permissions/workflow -X PUT \
          --input - <<'EOF'
        {"default_workflow_permissions": "write", "can_approve_pull_request_reviews": true}
+       EOF
+
+       # Auto-delete head branches after PR merge
+       gh api repos/<owner>/<repo> -X PATCH --input - <<'EOF'
+       {"delete_branch_on_merge": true}
        EOF
        ```
 
