@@ -228,6 +228,30 @@ Gather all context automatically. Do not ask the user anything in this phase.
 
 ## Phase 2 — Version Proposal
 
+### If bootstrap is needed
+
+Present a bootstrap proposal instead of the normal version proposal:
+
+> "This is a fresh project — no versions on the board and no existing code.
+> I recommend starting with a **[bootstrap]** issue to set up the project
+> skeleton before versioned feature work.
+>
+> Based on the GDD, bootstrap would set up:
+> - [tech stack / framework / engine setup from GDD]
+> - [folder structure derived from GDD architecture sections]
+> - [base config files from GDD technical requirements]
+> - [entry point / main scene / app shell from GDD]
+>
+> **Want to start with bootstrap, or jump straight to v0.1?**"
+
+Wait for the user's response.
+
+- If bootstrap: Skip Phase 3 (the GDD was just written by scout — no updates
+  needed yet). Proceed to Phase 4 with bootstrap mode.
+- If skip to v0.1: Proceed with the normal version proposal below.
+
+### Normal version proposal (no bootstrap needed, or user skipped bootstrap)
+
 Present your findings to the user and get confirmation.
 
 **Present (adapt to context, don't use verbatim):**
