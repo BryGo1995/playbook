@@ -1,0 +1,590 @@
+# Film Room Skill Implementation Plan
+
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+
+**Goal:** Create the `playbook:film-room` skill — a post-agent review and fix workflow that sets up a tracking issue and fix branch, manages a checklist during the session, and handles merge-back and cleanup when done.
+
+**Architecture:** Two files — `SKILL.md` (the prompt) and `issue-template.md` (the lightweight issue body template). The skill follows the same pattern as `playbook:scout` and `playbook:gameplan`: YAML frontmatter, phased flow with user gates, and `playbook.yaml` + `gh` CLI integration.
+
+**Tech Stack:** Markdown skill file, GitHub CLI (`gh`), git
+
+---
+
+### Task 1: Create the issue template
+
+**Files:**
+- Create: `skills/film-room/issue-template.md`
+
+This is the lightweight template that Phase 1 uses when creating the tracking issue. It's referenced by SKILL.md.
+
+- [ ] **Step 1: Create the issue template file**
+
+```markdown
+# Issue Template for Film Room Sessions
+
+Use this template when creating the tracking issue in Phase 1.
+The issue body grows during the session as the user identifies fixes.
+
+## Title Format
+
+`[vX.Y] Film Room: Post-Agent Review`
+
+For bootstrap: `[bootstrap] Film Room: Post-Agent Review`
+
+## Body Template
+
+~~~
+## Film Room: vX.Y Post-Agent Review
+
+**Branch:** `film-room/vX.Y`
+**Version branch:** `ai/dev-vX.Y`
+
+## Fixes
+(items added during session)
+
+## Notes
+~~~
+
+## Usage Notes
+
+- The "Fixes" section starts empty. Items are appended as the user identifies
+  problems during the working session.
+- Each fix is a checklist item: `- [ ] Description` when identified,
+  `- [x] Description` when committed.
+- The "Notes" section captures any context added during the session — edge
+  cases discovered, decisions made, things deferred.
+- The full issue body is maintained in conversation context and pushed to
+  GitHub via `gh issue edit --body` on each update.
+```
+
+Write this to `skills/film-room/issue-template.md`.
+
+- [ ] **Step 2: Commit**
+
+```bash
+git add skills/film-room/issue-template.md
+git commit -m "feat: add film-room issue template"
+```
+
+---
+
+### Task 2: Create the SKILL.md — frontmatter and overview
+
+**Files:**
+- Create: `skills/film-room/SKILL.md`
+
+Start the skill file with frontmatter and overview section, matching the pattern from scout and gameplan.
+
+- [ ] **Step 1: Write frontmatter, overview, and flow diagram**
+
+```markdown
+---
+name: playbook:film-room
+description: >
+  Use when agents have completed all tasks on a version branch and the user
+  wants to review the work, fix issues, and merge fixes back. Invoked
+  explicitly via /playbook:film-room. Sets up a tracking issue and fix branch,
+  manages a checklist during the session, and handles merge-back when done.
+---
+
+# Film Room — Playbook Orchestrator
+
+## Overview
+
+Act as a senior engineer running a post-agent review session. Set up the
+tracking infrastructure (issue, branch), help the user fix problems they
+identify, and handle the merge-back when they're done.
+
+The user is the reviewer. They identify problems, you fix them. Nothing gets
+added to the checklist without their direction.
+
+Film room supports one mode: review a completed version branch. One session
+reviews one version. To review multiple versions, invoke the skill multiple
+times.
+
+## Flow
+
+```dot
+digraph film_room {
+    "Phase 1:\nSetup" [shape=box];
+    "Config found?" [shape=diamond];
+    "Version branch\ndetected?" [shape=diamond];
+    "Summarize\nagent work" [shape=box];
+    "Create issue\n& branch" [shape=box];
+    "Hand off\nto user" [shape=box];
+    "Working Session:\nUser drives" [shape=box, style=dashed];
+    "User says done" [shape=diamond];
+    "Phase 2:\nWrap-up" [shape=box];
+    "Done" [shape=doublecircle];
+
+    "Phase 1:\nSetup" -> "Config found?";
+    "Config found?" -> "Version branch\ndetected?" [label="yes"];
+    "Config found?" -> "Stop:\nno playbook.yaml" [label="no"];
+    "Version branch\ndetected?" -> "Summarize\nagent work" [label="yes"];
+    "Version branch\ndetected?" -> "Stop:\nno completed\nversion" [label="no"];
+    "Summarize\nagent work" -> "Create issue\n& branch";
+    "Create issue\n& branch" -> "Hand off\nto user";
+    "Hand off\nto user" -> "Working Session:\nUser drives";
+    "Working Session:\nUser drives" -> "User says done";
+    "User says done" -> "Phase 2:\nWrap-up";
+    "Phase 2:\nWrap-up" -> "Done";
+}
+```
+```
+
+Write this as the beginning of `skills/film-room/SKILL.md`.
+
+- [ ] **Step 2: Commit**
+
+```bash
+git add skills/film-room/SKILL.md
+git commit -m "feat: add film-room skill frontmatter and overview"
+```
+
+---
+
+### Task 3: Write Phase 1 — Setup
+
+**Files:**
+- Modify: `skills/film-room/SKILL.md` (append after the Flow section)
+
+- [ ] **Step 1: Write Phase 1 content**
+
+Append the following to `skills/film-room/SKILL.md`:
+
+```markdown
+## Phase 1 — Setup
+
+Gather context and set up the tracking infrastructure. Do not ask the user
+anything until the hand-off step.
+
+### Step 1 — Read config
+
+1. Read `playbook.yaml` in the current working directory. If not found, stop:
+   > "No `playbook.yaml` found in the current directory. Run this skill from a
+   > repo that has a `playbook.yaml`."
+
+2. Extract:
+   - `repo` — the GitHub repo identifier (e.g., `BryGo1995/paint-ballas-auto`)
+   - `project.owner` and `project.number` — for project board queries
+   - `gdd_path` — to reference the GDD if needed for context
+
+### Step 2 — Detect version branch
+
+1. Check the current git branch: `git branch --show-current`
+2. If the current branch matches `ai/dev-v*` or `ai/dev-bootstrap`, use it as
+   the version branch. Extract the version from the branch name.
+3. Otherwise, auto-detect:
+   - Query the project board:
+     ```bash
+     gh project item-list <project_number> --owner <owner> --format json
+     ```
+   - Parse issue titles for version tags (`[vX.Y]`).
+   - Find the highest completed version — the version with the largest
+     `(major, minor)` tuple where all issues are in `Done` or `ai-complete`
+     status.
+   - Derive the branch name: `ai/dev-v{major}.{minor}` (or `ai/dev-bootstrap`
+     for version `(0, 0)`).
+4. If no completed version is found, stop:
+   > "No completed version found on the project board. Film room is for
+   > reviewing finished agent work."
+5. Verify the branch exists on the remote:
+   ```bash
+   git ls-remote --heads origin <version_branch>
+   ```
+   If it doesn't exist, stop:
+   > "Branch `<version_branch>` not found on remote. Has the agent work been
+   > pushed?"
+
+### Step 3 — Summarize agent work
+
+1. Fetch latest:
+   ```bash
+   git fetch origin
+   ```
+
+2. Get file-level diff summary:
+   ```bash
+   git diff main...origin/<version_branch> --stat
+   ```
+
+3. Query project board for all issues in this version — list their titles and
+   statuses.
+
+4. List merged PRs targeting the version branch:
+   ```bash
+   gh pr list --repo <repo> --base <version_branch> --state merged
+   ```
+
+5. Present a concise summary to the user:
+   - Version being reviewed
+   - What was built (issue titles and their statuses)
+   - How many files changed
+   - Which PRs were merged
+
+### Step 4 — Create tracking issue
+
+1. Read the issue template from `issue-template.md` in this skill directory.
+
+2. Create the issue:
+   ```bash
+   gh issue create --repo <repo> \
+     --title "[vX.Y] Film Room: Post-Agent Review" \
+     --body "$(cat <<'EOF'
+   ## Film Room: vX.Y Post-Agent Review
+
+   **Branch:** `film-room/vX.Y`
+   **Version branch:** `ai/dev-vX.Y`
+
+   ## Fixes
+   (items added during session)
+
+   ## Notes
+   EOF
+   )"
+   ```
+
+   For bootstrap versions, use `[bootstrap]` instead of `[vX.Y]`.
+
+3. Add the issue to the project board:
+   ```bash
+   gh project item-add <project_number> --owner <owner> --url <issue_url>
+   ```
+
+4. Store the issue number and the current issue body in conversation context
+   for later updates.
+
+### Step 5 — Create fix branch
+
+1. Check if `film-room/vX.Y` exists locally or remotely:
+   ```bash
+   git branch --list film-room/vX.Y
+   git ls-remote --heads origin film-room/vX.Y
+   ```
+
+2. If it exists, delete it (previous session, already merged):
+   - Local: `git branch -D film-room/vX.Y` (ignore errors if not local)
+   - Remote: `git push origin --delete film-room/vX.Y` (ignore errors if not
+     remote)
+
+3. Make sure local tracking is up to date:
+   ```bash
+   git checkout <version_branch>
+   git pull origin <version_branch>
+   ```
+
+4. Create and push the fix branch:
+   ```bash
+   git checkout -b film-room/vX.Y
+   git push -u origin film-room/vX.Y
+   ```
+
+### Step 6 — Hand off
+
+Present a confirmation message to the user:
+
+> **Film room is set up for vX.Y.**
+>
+> - **Tracking issue:** #N — [link]
+> - **Fix branch:** `film-room/vX.Y`
+> - **Reviewing:** `ai/dev-vX.Y`
+>
+> Tell me what needs fixing. I'll add items to the tracking issue as we go
+> and check them off when done.
+>
+> When you're finished, say "let's wrap up" and I'll handle the merge.
+```
+
+- [ ] **Step 2: Commit**
+
+```bash
+git add skills/film-room/SKILL.md
+git commit -m "feat: add film-room Phase 1 — Setup"
+```
+
+---
+
+### Task 4: Write Working Session section
+
+**Files:**
+- Modify: `skills/film-room/SKILL.md` (append after Phase 1)
+
+- [ ] **Step 1: Write the working session section**
+
+Append the following to `skills/film-room/SKILL.md`:
+
+```markdown
+## Working Session (Between Phases)
+
+The skill does not control this period. The user drives — they identify
+problems and direct fixes. Your responsibilities:
+
+### When the user identifies a problem
+
+1. Add an unchecked item to the issue body: `- [ ] Description of fix`
+2. Update the issue on GitHub:
+   ```bash
+   gh issue edit <issue_number> --repo <repo> --body "<full updated body>"
+   ```
+3. Confirm: "Added to the checklist. Let me fix that."
+
+### When a fix is committed
+
+1. Check off the item in the issue body: `- [x] Description of fix`
+2. Update the issue on GitHub with the same `gh issue edit` command.
+3. Confirm the fix is done and the checklist is updated.
+
+### When new problems are discovered during a fix
+
+Append them to the checklist. The list grows organically — no upfront lock-in.
+
+### Issue body management
+
+Maintain the full issue body in conversation context. On each update, replace
+the entire body via `gh issue edit --body`. This is simpler and more reliable
+than trying to patch individual checklist items via the API.
+
+### Guidelines
+
+- **Stay on the fix branch.** All commits go to `film-room/vX.Y`.
+- **Commit each fix individually.** One fix = one commit. This makes the
+  merge-back diff reviewable.
+- **Don't scope-creep.** If the user identifies something that needs a
+  redesign or new feature, suggest creating a separate issue for the next
+  version via gameplan. Film room is for fixes, not new work.
+- **Push periodically.** Push to remote after each fix so the branch is
+  backed up:
+  ```bash
+  git push origin film-room/vX.Y
+  ```
+```
+
+- [ ] **Step 2: Commit**
+
+```bash
+git add skills/film-room/SKILL.md
+git commit -m "feat: add film-room working session section"
+```
+
+---
+
+### Task 5: Write Phase 2 — Wrap-up
+
+**Files:**
+- Modify: `skills/film-room/SKILL.md` (append after Working Session)
+
+- [ ] **Step 1: Write Phase 2 content**
+
+Append the following to `skills/film-room/SKILL.md`:
+
+```markdown
+## Phase 2 — Wrap-up
+
+Triggered when the user indicates they are done (e.g., "let's wrap up",
+"I'm done", "merge it back").
+
+### Step 1 — Status check
+
+1. Compare the fix branch against the version branch:
+   ```bash
+   git log origin/<version_branch>..film-room/vX.Y --oneline
+   ```
+
+2. If no commits ahead, ask the user:
+   > "No changes on the fix branch. Close the issue and delete the branch
+   > without merging?"
+   If they confirm, skip to Step 5 (clean up).
+
+### Step 2 — Update tracking issue
+
+1. Review the checklist in the issue body.
+2. If any items are still unchecked, ask the user:
+   > "These items are still unchecked:
+   > - [ ] Item A
+   > - [ ] Item B
+   >
+   > Are you leaving them for later, or do they still need to be addressed?"
+3. If the user wants to address them, return to the working session.
+4. If leaving for later, add a note to the issue body under "## Notes"
+   explaining they were deferred.
+5. Push the final issue body update to GitHub.
+
+### Step 3 — Offer merge strategy
+
+Present two options:
+
+> **How would you like to merge the fixes?**
+>
+> **A) Pull Request** — I'll create a PR from `film-room/vX.Y` →
+> `ai/dev-vX.Y` with a summary of all fixes. You can review the diff one
+> more time before merging.
+>
+> **B) Direct merge** — I'll merge `film-room/vX.Y` into `ai/dev-vX.Y`
+> locally and push. No extra review step.
+
+Wait for the user's choice.
+
+### Step 4 — Execute merge
+
+**If Pull Request (A):**
+
+1. Push any unpushed commits:
+   ```bash
+   git push origin film-room/vX.Y
+   ```
+
+2. Build the PR body from the checklist — list all fixes that were applied.
+
+3. Create the PR:
+   ```bash
+   gh pr create --repo <repo> \
+     --base <version_branch> \
+     --head film-room/vX.Y \
+     --title "[vX.Y] Film Room Fixes" \
+     --body "$(cat <<'EOF'
+   ## Summary
+
+   Post-agent review fixes for vX.Y.
+
+   ## Fixes Applied
+   - Fix 1 description
+   - Fix 2 description
+
+   Closes #<tracking_issue_number>
+   EOF
+   )"
+   ```
+
+4. Tell the user:
+   > "PR created: [link]. Merge when you're ready — I'll clean up after."
+
+   Wait for the user to confirm the PR is merged before proceeding to Step 5.
+
+**If Direct merge (B):**
+
+1. Push any unpushed commits:
+   ```bash
+   git push origin film-room/vX.Y
+   ```
+
+2. Merge into the version branch:
+   ```bash
+   git checkout <version_branch>
+   git merge film-room/vX.Y
+   git push origin <version_branch>
+   ```
+
+3. Proceed to Step 5.
+
+### Step 5 — Clean up
+
+1. Delete the fix branch:
+   ```bash
+   git branch -D film-room/vX.Y
+   git push origin --delete film-room/vX.Y
+   ```
+
+2. Close the tracking issue with a summary comment:
+   ```bash
+   gh issue close <issue_number> --repo <repo> --comment "$(cat <<'EOF'
+   Film room session complete.
+   Fixed N items. Changes merged to <version_branch> via [PR #N / direct merge].
+   EOF
+   )"
+   ```
+
+3. Present a final summary to the user:
+   > **Film room complete for vX.Y.**
+   >
+   > - **Fixes applied:** N
+   > - **Files changed:** [count]
+   > - **Merged to:** `ai/dev-vX.Y` via [PR / direct merge]
+   > - **Tracking issue:** #N (closed)
+```
+
+- [ ] **Step 2: Commit**
+
+```bash
+git add skills/film-room/SKILL.md
+git commit -m "feat: add film-room Phase 2 — Wrap-up"
+```
+
+---
+
+### Task 6: Write Red Flags and Common Mistakes
+
+**Files:**
+- Modify: `skills/film-room/SKILL.md` (append after Phase 2)
+
+- [ ] **Step 1: Write red flags and common mistakes sections**
+
+Append the following to `skills/film-room/SKILL.md`:
+
+```markdown
+## Red Flags
+
+These thoughts mean STOP — you're about to skip a gate:
+
+| Thought | Reality |
+|---------|---------|
+| "I'll start fixing before setup is done" | Complete Phase 1 first. The tracking issue is the record. |
+| "This fix is small, no need to add it to the checklist" | Every fix goes on the checklist. The issue is the audit trail. |
+| "I'll batch these checklist updates" | Update the issue after each fix. Stale checklists defeat the purpose. |
+| "The user said wrap up but there are unchecked items" | Ask about them. Don't silently close incomplete work. |
+| "This needs a redesign, I'll do it in film room" | Film room is for fixes. Redesigns go to gameplan as new issues. |
+| "I'll merge without asking which strategy" | Always offer the choice. The user may want to review the diff. |
+
+## Common Mistakes
+
+- **Forgetting to push the fix branch** — Push after each fix. The branch
+  should always be backed up on the remote.
+- **Not updating the issue body** — The GitHub issue is the persistent record.
+  Conversation context is ephemeral. Keep the issue in sync.
+- **Scope creep** — A film room session is for fixing what the agents built,
+  not for adding new features. If something needs new work, suggest a gameplan
+  issue.
+- **Merging to main instead of the version branch** — The fix branch targets
+  the version branch (`ai/dev-vX.Y`), never `main`. The version branch gets
+  merged to main separately.
+- **Leaving stale branches** — Always clean up `film-room/vX.Y` in Step 5,
+  both local and remote.
+- **Closing the issue without a summary** — The close comment is the record
+  of what happened. Always include the fix count and merge method.
+```
+
+- [ ] **Step 2: Commit**
+
+```bash
+git add skills/film-room/SKILL.md
+git commit -m "feat: add film-room red flags and common mistakes"
+```
+
+---
+
+### Task 7: Update marketplace.json description
+
+**Files:**
+- Modify: `.claude-plugin/marketplace.json`
+
+The marketplace description should reflect that the plugin now has three skills.
+
+- [ ] **Step 1: Update the description**
+
+In `.claude-plugin/marketplace.json`, change the plugin description from:
+
+```json
+"description": "Scout (GDD/PRD creation) and Gameplan (version planning/issue decomposition) skills"
+```
+
+to:
+
+```json
+"description": "Scout (GDD/PRD creation), Gameplan (version planning/issue decomposition), and Film Room (post-agent review/fix) skills"
+```
+
+- [ ] **Step 2: Commit**
+
+```bash
+git add .claude-plugin/marketplace.json
+git commit -m "docs: update marketplace description for film-room skill"
+```
