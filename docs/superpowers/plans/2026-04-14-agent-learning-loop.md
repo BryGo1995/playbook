@@ -636,7 +636,7 @@ Skip this section if `learning.project_distiller` is false.
 1. Read the current `CLAUDE.md` from the project repo's working tree
    (empty string if it does not exist):
    ```bash
-   test -f CLAUDE.md && cat CLAUDE.md || echo ""
+   if [ -f CLAUDE.md ]; then cat CLAUDE.md; fi
    ```
 
 2. Read the distiller prompt:
@@ -726,30 +726,61 @@ Skip this section if `learning.agent_craft_distiller` is false.
    Done with distillers.
 
 7. **Otherwise**, open a PR against the playbook repo. The branch name
-   encodes the project + version so concurrent sessions do not collide:
-   ```bash
-   BRANCH="learning/<project_repo_slug>-vX.Y"
-   # Use the GitHub API to create or update the file on the new branch
-   # (avoids requiring a local clone of the playbook repo):
-   gh api -X PUT repos/<playbook_repo>/contents/$TARGET \
-     -f message="agent-craft: $MODE from <project_repo> vX.Y" \
-     -f content="$(jq -r .patched_file_contents /tmp/agent-craft.json | base64 -w0)" \
-     -f branch="$BRANCH" \
-     -f sha="<sha_of_existing_file_or_omit_if_new>"
-   gh pr create --repo <playbook_repo> \
-     --base main \
-     --head "$BRANCH" \
-     --title "agent-craft: $MODE from <project_repo> vX.Y film-room" \
-     --body "$(jq -r .pr_body /tmp/agent-craft.json)"
-   ```
-   Replace `<project_repo_slug>` with `<repo>` lowercased and with `/`
-   replaced by `-`. Get the existing file's SHA via:
-   ```bash
-   gh api repos/<playbook_repo>/contents/$TARGET --jq .sha
-   ```
-   Omit `-f sha=...` only if the file does not exist yet (e.g. first-ever
-   `docs/agent-craft-observations.md` write — but Task 4 of the rollout
-   plan seeded that file, so it already exists).
+   encodes the project + version so concurrent sessions do not collide.
+   First, resolve `<project_repo_slug>` — take the project's `<repo>`
+   identifier, lowercase it, and replace `/` with `-`.
+
+   Then run these steps in order:
+
+   a. Create the branch off `main` in the playbook repo (if it does not
+      already exist). Get the SHA of `main` first, then create the ref:
+      ```bash
+      BRANCH="learning/<project_repo_slug>-vX.Y"
+      MAIN_SHA=$(gh api repos/<playbook_repo>/git/refs/heads/main --jq .object.sha)
+      gh api -X POST repos/<playbook_repo>/git/refs \
+        -f ref="refs/heads/$BRANCH" \
+        -f sha="$MAIN_SHA" \
+        || echo "Branch already exists, continuing"
+      ```
+      The `|| echo ...` only catches the "already exists" case from
+      re-running the distiller after a failure; do not use it to mask
+      other errors — inspect the command's stderr.
+
+   b. Fetch the SHA of the existing file on that branch (if any). The
+      file may not exist (e.g. this is the first
+      `docs/agent-craft-observations.md` write, though Task 4 seeded it,
+      so it usually does exist):
+      ```bash
+      EXISTING_SHA=$(gh api repos/<playbook_repo>/contents/$TARGET?ref=$BRANCH --jq .sha 2>/dev/null || echo "")
+      ```
+
+   c. Write the patched file contents to the branch via `gh api -X PUT`.
+      Include `-f sha="$EXISTING_SHA"` only when `$EXISTING_SHA` is
+      non-empty (the API rejects empty-string SHAs but requires the SHA
+      for updates):
+      ```bash
+      if [ -n "$EXISTING_SHA" ]; then
+        gh api -X PUT repos/<playbook_repo>/contents/$TARGET \
+          -f message="agent-craft: $MODE from <project_repo> vX.Y" \
+          -f content="$(jq -r .patched_file_contents /tmp/agent-craft.json | base64 -w0)" \
+          -f branch="$BRANCH" \
+          -f sha="$EXISTING_SHA"
+      else
+        gh api -X PUT repos/<playbook_repo>/contents/$TARGET \
+          -f message="agent-craft: $MODE from <project_repo> vX.Y" \
+          -f content="$(jq -r .patched_file_contents /tmp/agent-craft.json | base64 -w0)" \
+          -f branch="$BRANCH"
+      fi
+      ```
+
+   d. Open the PR:
+      ```bash
+      gh pr create --repo <playbook_repo> \
+        --base main \
+        --head "$BRANCH" \
+        --title "agent-craft: $MODE from <project_repo> vX.Y film-room" \
+        --body "$(jq -r .pr_body /tmp/agent-craft.json)"
+      ```
 
    Tell the user the PR URL.
 
