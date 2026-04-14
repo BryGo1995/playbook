@@ -34,3 +34,9 @@ statuses:
 
 slack:
   webhook_url: "${SLACK_WEBHOOK_URL}"
+
+learning:
+  enabled: true
+  project_distiller: true
+  agent_craft_distiller: true
+  playbook_repo: "BryGo1995/playbook"
