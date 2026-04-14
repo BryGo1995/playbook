@@ -239,7 +239,8 @@ than trying to patch individual checklist items via the API.
 ## Phase 2 — Wrap-up
 
 Triggered when the user indicates they are done (e.g., "let's wrap up",
-"I'm done", "merge it back").
+"I'm done", "merge it back"). Wrap-up runs the merge, then the learning
+distillers (Step 4.5), then cleanup.
 
 ### Step 1 — Status check
 
@@ -334,6 +335,186 @@ Wait for the user's choice.
 
 3. Proceed to Step 5.
 
+### Step 4.5 — Run distillers
+
+Two distillers run after the merge but before cleanup. Each is a `claude
+-p` invocation that consumes the film-room data and either opens a PR or
+exits cleanly with no PR. Both are skipped when:
+
+- `learning.enabled` is `false` in `playbook.yaml` (use the merged config
+  from `defaults.yaml` + `playbook.yaml`), **OR**
+- the fix branch had zero commits ahead of the version branch (already
+  the early-exit path from Step 1).
+
+Skip individual distillers when their toggle is false:
+- `learning.project_distiller: false` → skip the project distiller.
+- `learning.agent_craft_distiller: false` → skip the agent-craft
+  distiller.
+
+#### Gather the input bundle (shared by both distillers)
+
+Run these commands and capture each output for use in both distiller
+invocations. All paths are absolute or rooted at the project repo's
+working tree.
+
+1. **Tracking issue body:**
+   ```bash
+   gh issue view <issue_number> --repo <repo> --json body --jq .body
+   ```
+
+2. **Fix commits with diffs:**
+   ```bash
+   git log origin/<version_branch>..film-room/<version_label> --patch
+   ```
+   Where `<version_label>` is `vX.Y` or `bootstrap` to match the branch.
+
+3. **Original agent PRs for this version** (titles, bodies, diff URLs):
+   ```bash
+   gh pr list --repo <repo> --base <version_branch> --state merged \
+     --json number,title,body,url
+   ```
+
+4. **Original issues** the agents worked on — for each PR from step 3,
+   parse `Closes #N` / `Fixes #N` references from the PR body, then:
+   ```bash
+   gh issue view <N> --repo <repo> --json title,body
+   ```
+
+Combine all of the above into a single text bundle. The exact format does
+not matter; the distillers are told what fields to expect.
+
+#### Run the project distiller
+
+Skip this section if `learning.project_distiller` is false.
+
+1. Read the current `CLAUDE.md` from the project repo's working tree
+   (empty string if it does not exist):
+   ```bash
+   test -f CLAUDE.md && cat CLAUDE.md || echo ""
+   ```
+
+2. Read the distiller prompt:
+   ```bash
+   cat <playbook_repo_path>/skills/film-room/distillers/project-distiller.md
+   ```
+   Replace `<playbook_repo_path>` with the absolute path to the playbook
+   repo on the operator's machine. (You can locate it via the skill's own
+   directory: the prompt file lives next to `SKILL.md`.)
+
+3. Build the distiller invocation. Pass the prompt + the input bundle +
+   the current `CLAUDE.md` + the repo identifier + the version label as
+   the `claude -p` prompt body. The distiller is told to emit JSON-only.
+
+   ```bash
+   claude -p --output-format json --max-budget-usd 1.0 "$DISTILLER_PROMPT_WITH_INPUTS" > /tmp/project-distiller.json
+   ```
+
+4. Parse the JSON output:
+   ```bash
+   jq -r .claude_md /tmp/project-distiller.json
+   jq -r .pr_body  /tmp/project-distiller.json
+   jq -r .lessons_added /tmp/project-distiller.json
+   ```
+
+5. **If `claude_md` is `null` or `lessons_added` is `0`**, tell the user:
+   > "Project distiller ran but proposed no lessons (every fix was a local
+   > incident or already covered in CLAUDE.md). No PR opened."
+   Skip to the agent-craft distiller.
+
+6. **Otherwise**, open a PR against the project repo:
+   ```bash
+   git checkout -b learning/film-room-vX.Y origin/main
+   # Write the new CLAUDE.md from the distiller output:
+   jq -r .claude_md /tmp/project-distiller.json > CLAUDE.md
+   git add CLAUDE.md
+   git commit -m "chore: capture lessons from vX.Y film-room"
+   git push -u origin learning/film-room-vX.Y
+   gh pr create --repo <repo> \
+     --base main \
+     --head learning/film-room-vX.Y \
+     --title "Lessons from vX.Y film-room" \
+     --body "$(jq -r .pr_body /tmp/project-distiller.json)"
+   ```
+   Tell the user the PR URL.
+
+#### Run the agent-craft distiller
+
+Skip this section if `learning.agent_craft_distiller` is false.
+
+1. Resolve the playbook repo identifier from the merged config:
+   `learning.playbook_repo` (default `BryGo1995/playbook`).
+
+2. Read the current playbook agent prompts and the observations log from
+   the playbook repo. Use `gh api` so the operator does not need a local
+   clone:
+   ```bash
+   gh api repos/<playbook_repo>/contents/agents/coding.py   --jq .content | base64 -d
+   gh api repos/<playbook_repo>/contents/agents/review.py   --jq .content | base64 -d
+   gh api repos/<playbook_repo>/contents/agents/testing.py  --jq .content | base64 -d
+   gh api repos/<playbook_repo>/contents/docs/agent-craft-observations.md --jq .content | base64 -d
+   ```
+
+3. Read the agent-craft distiller prompt (sibling of `SKILL.md`):
+   ```bash
+   cat <playbook_repo_path>/skills/film-room/distillers/agent-craft-distiller.md
+   ```
+
+4. Build the distiller invocation. Pass: the prompt + the input bundle +
+   the three agent files + the observations log + the playbook repo id +
+   the project repo id + the version + today's date + the project
+   film-room issue URL.
+
+   ```bash
+   claude -p --output-format json --max-budget-usd 1.0 "$AGENT_CRAFT_PROMPT_WITH_INPUTS" > /tmp/agent-craft.json
+   ```
+
+5. Parse the JSON output:
+   ```bash
+   MODE=$(jq -r .mode /tmp/agent-craft.json)
+   TARGET=$(jq -r .target_file /tmp/agent-craft.json)
+   ```
+
+6. **If `mode` is `"skip"`**, tell the user:
+   > "Agent-craft distiller ran and found no agent-craft signals this
+   > session. No PR opened."
+   Done with distillers.
+
+7. **Otherwise**, open a PR against the playbook repo. The branch name
+   encodes the project + version so concurrent sessions do not collide:
+   ```bash
+   BRANCH="learning/<project_repo_slug>-vX.Y"
+   # Use the GitHub API to create or update the file on the new branch
+   # (avoids requiring a local clone of the playbook repo):
+   gh api -X PUT repos/<playbook_repo>/contents/$TARGET \
+     -f message="agent-craft: $MODE from <project_repo> vX.Y" \
+     -f content="$(jq -r .patched_file_contents /tmp/agent-craft.json | base64 -w0)" \
+     -f branch="$BRANCH" \
+     -f sha="<sha_of_existing_file_or_omit_if_new>"
+   gh pr create --repo <playbook_repo> \
+     --base main \
+     --head "$BRANCH" \
+     --title "agent-craft: $MODE from <project_repo> vX.Y film-room" \
+     --body "$(jq -r .pr_body /tmp/agent-craft.json)"
+   ```
+   Replace `<project_repo_slug>` with `<repo>` lowercased and with `/`
+   replaced by `-`. Get the existing file's SHA via:
+   ```bash
+   gh api repos/<playbook_repo>/contents/$TARGET --jq .sha
+   ```
+   Omit `-f sha=...` only if the file does not exist yet (e.g. first-ever
+   `docs/agent-craft-observations.md` write — but Task 4 of the rollout
+   plan seeded that file, so it already exists).
+
+   Tell the user the PR URL.
+
+#### Tell the user what happened
+
+Before moving to Step 5, summarize:
+
+> "Distillers complete:
+> - Project distiller: <PR link, or 'no lessons proposed'>
+> - Agent-craft distiller: <PR link, or 'no signals this session'>"
+
 ### Step 5 — Clean up
 
 1. Delete the fix branch:
@@ -388,3 +569,6 @@ These thoughts mean STOP — you're about to skip a gate:
   both local and remote.
 - **Closing the issue without a summary** — The close comment is the record
   of what happened. Always include the fix count and merge method.
+- **Skipping the distillers** — Step 4.5 runs both distillers automatically
+  unless `learning.enabled: false`. Do not skip them to "save time" —
+  every skipped session is signal lost forever (no backfill in v1).
