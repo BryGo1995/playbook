@@ -207,6 +207,32 @@ When agents merge into `ai/dev`, a GitHub Action creates or updates a PR targeti
 | Review rejected | Review agent sent the issue back for rework |
 | Version complete | All issues in a version reached `Done` |
 
+### Learning Loop
+
+Each film-room session ends by running two distillers that turn the
+human-validated fixes into proposed improvements:
+
+- **Project distiller** — proposes additions to the project repo's
+  `CLAUDE.md` so future agents working on the same repo pick up the
+  conventions automatically. Output: a PR against the project repo.
+- **Agent-craft distiller** — looks for failure modes of the agents
+  themselves (not project conventions) and either proposes a prompt edit
+  to `agents/{coding,review,testing}.py` (when ≥2 fixes show the same
+  pattern, or one severe occurrence) or appends an entry to
+  `docs/agent-craft-observations.md` for future pattern-matching. Output:
+  a PR against the playbook repo.
+
+Both distillers always produce PRs — never auto-merges. The human is the
+gate. Disable per-project via `playbook.yaml`:
+
+```yaml
+learning:
+  enabled: true              # set false to disable both distillers
+  project_distiller: true
+  agent_craft_distiller: true
+  playbook_repo: "BryGo1995/playbook"
+```
+
 ### Project Structure
 
 ```
