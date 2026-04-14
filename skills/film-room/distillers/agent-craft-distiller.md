@@ -167,4 +167,7 @@ Source: <project_film_room_issue_url>
   fix — agent prompts are cross-project, so keep them generic.
 - Never propose a prompt edit and an observation in the same run. Choose
   one mode per invocation.
-- Output is JSON-only. No surrounding prose.
+- Output is **raw JSON only**. Do not wrap the JSON in a code fence (no
+  ```json ... ``` markers). Do not emit any prose, explanation, or
+  surrounding text — the very first character of your response must be
+  `{` and the very last must be `}`.

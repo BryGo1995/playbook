@@ -409,14 +409,30 @@ Skip this section if `learning.project_distiller` is false.
    claude -p --output-format json --max-budget-usd 1.0 "$DISTILLER_PROMPT_WITH_INPUTS" > /tmp/project-distiller.json
    ```
 
-4. Parse the JSON output:
+4. Unwrap the `claude -p` envelope and re-parse the distiller's payload:
    ```bash
-   jq -r .claude_md /tmp/project-distiller.json
-   jq -r .pr_body  /tmp/project-distiller.json
-   jq -r .lessons_added /tmp/project-distiller.json
+   # Check the wrapper — skip if claude -p errored:
+   SUBTYPE=$(jq -r .subtype /tmp/project-distiller.json)
+   if [ "$SUBTYPE" != "success" ]; then
+     echo "Project distiller errored (subtype=$SUBTYPE); skipping."
+     # tell the user and continue to the agent-craft distiller
+     # (do NOT treat this as 'no lessons proposed' — it's an error)
+   fi
+
+   # Unwrap the payload (distillers are told to emit raw JSON, no fences,
+   # but be defensive — strip a leading/trailing ```json / ``` fence if
+   # present):
+   PAYLOAD=$(jq -r .result /tmp/project-distiller.json \
+     | sed -e 's/^```json$//' -e 's/^```$//' \
+     | sed -e '/./,$!d')
+
+   # Now PAYLOAD is the distiller's JSON object. Re-parse:
+   CLAUDE_MD=$(echo "$PAYLOAD" | jq -r .claude_md)
+   PR_BODY=$(echo "$PAYLOAD" | jq -r .pr_body)
+   LESSONS=$(echo "$PAYLOAD" | jq -r .lessons_added)
    ```
 
-5. **If `claude_md` is `null` or `lessons_added` is `0`**, tell the user:
+5. **If `CLAUDE_MD` is the string `null` or `LESSONS` is `0`**, tell the user:
    > "Project distiller ran but proposed no lessons (every fix was a local
    > incident or already covered in CLAUDE.md). No PR opened."
    Skip to the agent-craft distiller.
@@ -425,17 +441,23 @@ Skip this section if `learning.project_distiller` is false.
    ```bash
    git checkout -b learning/film-room-vX.Y origin/main
    # Write the new CLAUDE.md from the distiller output:
-   jq -r .claude_md /tmp/project-distiller.json > CLAUDE.md
+   printf '%s' "$CLAUDE_MD" > CLAUDE.md
    git add CLAUDE.md
    git commit -m "chore: capture lessons from vX.Y film-room"
    git push -u origin learning/film-room-vX.Y
+   printf '%s' "$PR_BODY" > /tmp/project-distiller.prbody.md
    gh pr create --repo <repo> \
      --base main \
      --head learning/film-room-vX.Y \
      --title "Lessons from vX.Y film-room" \
-     --body "$(jq -r .pr_body /tmp/project-distiller.json)"
+     --body-file /tmp/project-distiller.prbody.md
    ```
    Tell the user the PR URL.
+
+   After the PR is created, return to the film-room fix branch:
+   ```bash
+   git checkout film-room/<version_label>
+   ```
 
 #### Run the agent-craft distiller
 
@@ -468,13 +490,22 @@ Skip this section if `learning.agent_craft_distiller` is false.
    claude -p --output-format json --max-budget-usd 1.0 "$AGENT_CRAFT_PROMPT_WITH_INPUTS" > /tmp/agent-craft.json
    ```
 
-5. Parse the JSON output:
+5. Unwrap the `claude -p` envelope and re-parse the distiller's payload:
    ```bash
-   MODE=$(jq -r .mode /tmp/agent-craft.json)
-   TARGET=$(jq -r .target_file /tmp/agent-craft.json)
+   SUBTYPE=$(jq -r .subtype /tmp/agent-craft.json)
+   if [ "$SUBTYPE" != "success" ]; then
+     echo "Agent-craft distiller errored (subtype=$SUBTYPE); skipping."
+   fi
+   PAYLOAD=$(jq -r .result /tmp/agent-craft.json \
+     | sed -e 's/^```json$//' -e 's/^```$//' \
+     | sed -e '/./,$!d')
+   MODE=$(echo "$PAYLOAD" | jq -r .mode)
+   TARGET=$(echo "$PAYLOAD" | jq -r .target_file)
+   PATCHED=$(echo "$PAYLOAD" | jq -r .patched_file_contents)
+   PR_BODY_AC=$(echo "$PAYLOAD" | jq -r .pr_body)
    ```
 
-6. **If `mode` is `"skip"`**, tell the user:
+6. **If `MODE` is `"skip"`**, tell the user:
    > "Agent-craft distiller ran and found no agent-craft signals this
    > session. No PR opened."
    Done with distillers.
@@ -516,24 +547,25 @@ Skip this section if `learning.agent_craft_distiller` is false.
       if [ -n "$EXISTING_SHA" ]; then
         gh api -X PUT repos/<playbook_repo>/contents/$TARGET \
           -f message="agent-craft: $MODE from <project_repo> vX.Y" \
-          -f content="$(jq -r .patched_file_contents /tmp/agent-craft.json | base64 -w0)" \
+          -f content="$(echo "$PATCHED" | base64 -w0)" \
           -f branch="$BRANCH" \
           -f sha="$EXISTING_SHA"
       else
         gh api -X PUT repos/<playbook_repo>/contents/$TARGET \
           -f message="agent-craft: $MODE from <project_repo> vX.Y" \
-          -f content="$(jq -r .patched_file_contents /tmp/agent-craft.json | base64 -w0)" \
+          -f content="$(echo "$PATCHED" | base64 -w0)" \
           -f branch="$BRANCH"
       fi
       ```
 
    d. Open the PR:
       ```bash
+      printf '%s' "$PR_BODY_AC" > /tmp/agent-craft.prbody.md
       gh pr create --repo <playbook_repo> \
         --base main \
         --head "$BRANCH" \
         --title "agent-craft: $MODE from <project_repo> vX.Y film-room" \
-        --body "$(jq -r .pr_body /tmp/agent-craft.json)"
+        --body-file /tmp/agent-craft.prbody.md
       ```
 
    Tell the user the PR URL.
