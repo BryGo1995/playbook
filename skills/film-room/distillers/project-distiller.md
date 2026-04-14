@@ -135,4 +135,7 @@ inputs.
 - Never propose a lesson that contradicts something already in `CLAUDE.md`.
   If you find a contradiction, skip the lesson and note it in the PR body
   under a `### Conflicts (not added)` section.
-- Output is JSON-only. No surrounding prose.
+- Output is **raw JSON only**. Do not wrap the JSON in a code fence (no
+  ```json ... ``` markers). Do not emit any prose, explanation, or
+  surrounding text — the very first character of your response must be
+  `{` and the very last must be `}`.
