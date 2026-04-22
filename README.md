@@ -4,6 +4,16 @@ A lightweight orchestrator that dispatches Claude Code headless agents to work o
 
 Playbook also ships as a Claude Code plugin with three skills — **Scout**, **Gameplan**, and **Film Room** — that cover design, planning, and post-run review.
 
+**Tech stack:** Python 3.11 · Anthropic Claude API (`claude -p` headless) · GitHub REST API (PyGithub) · Slack webhooks · cron
+
+### Highlights
+
+- **Multi-agent orchestration.** Coding, testing, and review agents run as scoped `claude -p` subprocesses with per-agent `--allowedTools` allowlists — the review agent is read-only and the testing agent can only write test files, so an agent can't trash the repo even if it tries.
+- **Version-gated dispatch.** Issues tagged `[vX.Y]` execute in order; the orchestrator holds the next wave until the current version is fully `Done`, which keeps concurrent agents from stepping on each other's merges.
+- **Integration branch pattern.** Agents never touch `main`. Each coding agent branches from a shared `ai/dev`, and a GitHub Action maintains a single persistent `ai/dev → main` PR for human review.
+- **Self-improving workflow.** Each film-room review session feeds two distillers that turn human-validated fixes into proposed PRs — one updating the target repo's `CLAUDE.md`, one updating the agent prompts themselves. Humans stay the gate; nothing auto-merges.
+- **Guardrails out of the box.** Concurrency caps, per-agent timeouts, retry limits, ≤10-file scope caps, draft-only PRs, and Slack alerts on blocks / errors / timeouts plus 8am/8pm activity summaries.
+
 ---
 
 ## Usage
