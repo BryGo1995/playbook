@@ -476,6 +476,52 @@ Example format:
 After the user reviews and approves the decomposition, expand each issue into the
 full template from `issue-template.md`.
 
+### Structural check (Component 1)
+
+After expanding each issue, run the structural check on every acceptance criterion and every testing criterion. Read the rubric at `skills/gameplan/structural-check-rubric.md` in this plugin's directory.
+
+For each criterion:
+
+1. Evaluate against the anchor list in the rubric.
+2. If weak: run exactly one revision pass using the rubric's revision prompt. Replace the criterion with the revised text.
+3. If genuinely subjective: prefix with `[subjective]`. Do not revise.
+4. If the revision still fails to produce an anchor: keep the original, note it in the output.
+
+**Write the structural check results** to the project repo's `metrics/vX.Y.md` file (use `metrics/bootstrap.md` for bootstrap). Check `metrics.enabled` in the merged config — if false, skip this entire step.
+
+The file does not exist yet at this point (film-room will add the classification section later). Create it with this initial content:
+
+````markdown
+---
+version: <vX.Y or bootstrap>
+date: <today's ISO date>
+issues: <count of issues in this version>
+first_pass_clean: 0
+fixes_total: 0
+cost_usd: 0.0
+---
+
+## Structural check (gameplan)
+
+<per-issue lines as specified in structural-check-rubric.md>
+
+## Classification (film-room)
+
+_Not yet run — will be written by film-room at end of next session._
+````
+
+**Always-written, regardless of `show_checks`.** The file is written whether or not the user sees the summary.
+
+**If `metrics.show_checks` is `true`,** also echo the same structural-check block to the user before the "Open the floor for discussion" prompt, prefixed with:
+
+```
+[gameplan] structural check results:
+```
+
+**If `metrics.show_checks` is `false`,** write silently to the metrics file and proceed directly to the discussion prompt.
+
+**If `metrics.enabled` is `false`,** skip both the check and the file write entirely.
+
 **Open the floor for discussion.** The user may want to:
 - Split an issue that's too large
 - Merge issues that are too granular
@@ -521,7 +567,15 @@ Once the user approves the full issue set:
    >
    > All set to "ai-ready". The orchestrator will pick them up on the next cycle.
 
-4. **Register with orchestrator** — Check if `orchestrator_dir` is set in
+4. **Commit the metrics file** — if `metrics.enabled` is true and `metrics/vX.Y.md` was written in Phase 4, commit it:
+   ```bash
+   git add metrics/vX.Y.md
+   git commit -m "chore: record structural check for vX.Y"
+   ```
+
+   Substitute `vX.Y` with the actual version label (or `bootstrap`). This keeps the metrics commit atomic and lets git history show when structural-check data was captured.
+
+5. **Register with orchestrator** — Check if `orchestrator_dir` is set in
    `playbook.yaml`. If it is:
 
    a. Read `run-all.sh` in that directory.
