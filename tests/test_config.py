@@ -151,3 +151,47 @@ def test_load_config_env_vars_resolved_in_merged_config(tmp_path, monkeypatch):
 
     cfg = load_config(project_dir=str(project_dir), defaults_path=str(defaults_dir / "defaults.yaml"))
     assert cfg["slack"]["webhook_url"] == "https://hooks.slack.com/merged"
+
+
+def test_metrics_defaults_loaded(tmp_path):
+    """metrics section has documented defaults when project config doesn't override."""
+    defaults_dir = tmp_path / "playbook"
+    defaults_dir.mkdir()
+    # Use the real defaults.yaml — copy it into the tmp path
+    import shutil
+    real_defaults = os.path.join(os.path.dirname(os.path.dirname(__file__)), "defaults.yaml")
+    shutil.copy(real_defaults, defaults_dir / "defaults.yaml")
+
+    project_dir = tmp_path / "my-project"
+    project_dir.mkdir()
+    (project_dir / "playbook.yaml").write_text("repo: owner/my-project\n")
+
+    cfg = load_config(project_dir=str(project_dir), defaults_path=str(defaults_dir / "defaults.yaml"))
+    assert cfg["metrics"]["enabled"] is True
+    assert cfg["metrics"]["show_checks"] is False
+    assert cfg["metrics"]["classification_budget_usd"] == 0.25
+
+
+def test_metrics_project_overrides_defaults(tmp_path):
+    """Project playbook.yaml can override metrics settings."""
+    defaults_dir = tmp_path / "playbook"
+    defaults_dir.mkdir()
+    (defaults_dir / "defaults.yaml").write_text("""
+metrics:
+  enabled: true
+  show_checks: false
+  classification_budget_usd: 0.25
+""")
+
+    project_dir = tmp_path / "my-project"
+    project_dir.mkdir()
+    (project_dir / "playbook.yaml").write_text("""
+repo: owner/my-project
+metrics:
+  show_checks: true
+""")
+
+    cfg = load_config(project_dir=str(project_dir), defaults_path=str(defaults_dir / "defaults.yaml"))
+    assert cfg["metrics"]["enabled"] is True  # inherited
+    assert cfg["metrics"]["show_checks"] is True  # overridden
+    assert cfg["metrics"]["classification_budget_usd"] == 0.25  # inherited

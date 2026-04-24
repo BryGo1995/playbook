@@ -54,12 +54,12 @@ Criteria built around hollow verbs with no anchor: "works", "functions correctly
 
 ### Special case: subjective criteria
 
-Game dev has real criteria that cannot be operationalized — "combat feels snappy", "the menu looks clean". Do not try to sharpen these. Tag them `subjective: needs-human-eval` and let them through. This tag flows to film-room so the product owner knows to check them first.
+Game dev has real criteria that cannot be operationalized — "combat feels snappy", "the menu looks clean". Do not try to sharpen these. Tag them with a `[subjective]` prefix and let them through. This marker flows to film-room so the product owner knows to check them first.
 
 ### Behavior
 
 - For weak criteria: gameplan runs **at most one revision attempt per flagged criterion** ("this criterion lacks a number or observable state; revise to include one, or mark as subjective if genuinely about feel/aesthetics"). If the revision is still weak, the original stands.
-- For genuinely subjective criteria: tag with `subjective: needs-human-eval`, do not revise.
+- For genuinely subjective criteria: prefix with `[subjective]`, do not revise.
 - **Advisory, never blocking.** If self-revision fails or cannot sharpen, keep the original and proceed. Component 2 is the backstop.
 
 ### Message to user (when `metrics.show_checks: true`)

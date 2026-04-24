@@ -12,6 +12,7 @@ Playbook also ships as a Claude Code plugin with three skills — **Scout**, **G
 - **Version-gated dispatch.** Issues tagged `[vX.Y]` execute in order; the orchestrator holds the next wave until the current version is fully `Done`, which keeps concurrent agents from stepping on each other's merges.
 - **Integration branch pattern.** Agents never touch `main`. Each coding agent branches from a shared `ai/dev`, and a GitHub Action maintains a single persistent `ai/dev → main` PR for human review.
 - **Self-improving workflow.** Each film-room review session feeds two distillers that turn human-validated fixes into proposed PRs — one updating the target repo's `CLAUDE.md`, one updating the agent prompts themselves. Humans stay the gate; nothing auto-merges.
+- **Quality-signal metrics.** A structural check sharpens vague acceptance criteria at plan time; a classifier tags every film-room fix by where it should have been caught (`gameplan-criteria`, `coding-misread`, `gdd-gap`, etc.). Per-version data plus a cross-version rollup surface which part of the pipeline needs prompt tuning. Off by default, opt-in via one config flag.
 - **Guardrails out of the box.** Concurrency caps, per-agent timeouts, retry limits, ≤10-file scope caps, draft-only PRs, and Slack alerts on blocks / errors / timeouts plus 8am/8pm activity summaries.
 
 ---
@@ -242,6 +243,24 @@ learning:
   agent_craft_distiller: true
   playbook_repo: "BryGo1995/playbook"
 ```
+
+### Quality Metrics
+
+Two lightweight probes capture where quality leaks in the pipeline:
+
+- **Structural check (gameplan).** Before presenting issues, auto-revises acceptance criteria that lack measurable anchors (numbers, states, comparisons). Genuinely subjective criteria get a `[subjective]` marker that flows to film-room.
+- **Classifier (film-room).** At end of each session, a subagent classifies every fix by the earliest upstream point where it should have been caught. Writes per-version data to `metrics/vX.Y.md` and regenerates a cross-version `metrics/SUMMARY.md` rollup for trend spotting.
+
+Disabled by default. Enable per-project via `playbook.yaml`:
+
+```yaml
+metrics:
+  enabled: true
+  show_checks: false               # flip to true to see inline summaries during skill sessions
+  classification_budget_usd: 0.25  # per-version classifier cap
+```
+
+Format reference: `docs/metrics-format.md`.
 
 ### Project Structure
 

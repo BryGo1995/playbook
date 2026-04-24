@@ -578,6 +578,153 @@ Before moving to Step 5, summarize:
 > - Project distiller: <PR link, or 'no lessons proposed'>
 > - Agent-craft distiller: <PR link, or 'no signals this session'>"
 
+### Step 4.6 — Run the classifier (metrics)
+
+Runs the Component 2 classifier as a fresh `claude -p` subagent, mirroring the distiller pattern from Step 4.5. Skip this step entirely when:
+
+- `metrics.enabled` is `false` in the merged config, **OR**
+- the fix branch had zero commits ahead of the version branch (first-pass clean).
+
+If skipped due to first-pass clean: update `metrics/vX.Y.md` by writing `_No fixes made — classification skipped._` in the `## Classification (film-room)` section and setting frontmatter `fixes_total: 0`, `first_pass_clean: <issues count>`. Still regenerate `SUMMARY.md` (Step 4.7) before proceeding to cleanup.
+
+#### Invoke the classifier
+
+Reuse the input bundle gathered by Step 4.5 (tracking issue body, fix commit patches, merged PRs, original issues).
+
+1. Read the rubric and the subagent prompt:
+   ```bash
+   cat <playbook_repo_path>/skills/film-room/classification-rubric.md
+   cat <playbook_repo_path>/skills/film-room/classifier-prompt.md
+   ```
+
+2. Build the combined prompt body in the order specified by `classifier-prompt.md` (`## Rubric` first, then the bundle sections).
+
+3. Invoke with the budget cap from `metrics.classification_budget_usd`:
+   ```bash
+   BUDGET=$(python -c "import yaml, os; cfg = yaml.safe_load(open('playbook.yaml')); print(cfg.get('metrics', {}).get('classification_budget_usd', 0.25))")
+   claude -p --output-format json --max-budget-usd "$BUDGET" "$CLASSIFIER_PROMPT_WITH_INPUTS" > /tmp/classifier.json
+   ```
+
+4. Unwrap the `claude -p` envelope and re-parse the classifier's payload (identical pattern to the distillers):
+   ```bash
+   SUBTYPE=$(jq -r .subtype /tmp/classifier.json)
+   if [ "$SUBTYPE" != "success" ]; then
+     echo "Classifier errored (subtype=$SUBTYPE); writing stub metrics and continuing."
+     # Write a stub: "Classifier unavailable for this run." in the classification section.
+     # Do NOT block the session.
+     CLASSIFIER_FAILED=true
+   else
+     PAYLOAD=$(jq -r .result /tmp/classifier.json \
+       | sed -e 's/^```json$//' -e 's/^```$//' \
+       | sed -e '/./,$!d')
+   fi
+   ```
+
+5. If `CLASSIFIER_FAILED` is not yet true, check for the classifier's error-fallback payload explicitly:
+   ```bash
+   if [ "${CLASSIFIER_FAILED:-false}" != "true" ]; then
+     ERROR_KEY=$(echo "$PAYLOAD" | jq -r '.error // empty')
+     if [ -n "$ERROR_KEY" ]; then
+       CLASSIFIER_FAILED=true
+     fi
+   fi
+   ```
+
+#### Write the classification section
+
+Append (or replace, if it already exists as a `_Not yet run_` placeholder from gameplan) the `## Classification (film-room)` section in `metrics/vX.Y.md`.
+
+- Split into `### Failures` and `### Expected iteration` subsections.
+- For each fix in the payload, write:
+
+  ```markdown
+  - <fix description>
+      primary: <tag> | confidence: <level>
+      reasoning: <one to two sentences>
+  ```
+
+- If the fix has a secondary tag, add `| secondary: <tag>` after primary.
+
+Update the frontmatter: set `failures`, `iterations`, `fixes_total`, `first_pass_clean`. Add the classifier's cost (from the `claude -p` envelope's `total_cost_usd` field) to any existing `cost_usd` value in the frontmatter.
+
+If `CLASSIFIER_FAILED=true`, write this in place of the normal section:
+
+```markdown
+## Classification (film-room)
+
+_Classifier unavailable for this run (subtype=<subtype> or error). Metrics for this version are incomplete._
+```
+
+Leave the frontmatter's failure/iteration counts absent.
+
+#### Echo summary to user (only if `metrics.show_checks` is `true`)
+
+Print the summary block in the same format as the structural check echo:
+
+```
+[film-room] classification for <version> — <N> fixes:
+
+  Failures (where quality leaked):
+    · <tag>: <count> (<percent>%)
+    ...
+
+  Expected iteration (not failures):
+    · <tag>: <count>
+    ...
+
+  Top signal: <top failure tag>. Patterns seen:
+    - <derived from reasoning fields>
+
+  Written to: metrics/<version>.md
+```
+
+If `metrics.show_checks` is `false`, do not echo. The file is still written.
+
+### Step 4.7 — Regenerate `metrics/SUMMARY.md`
+
+Runs after Step 4.6 regardless of whether classification ran. Skip only if `metrics.enabled` is `false`.
+
+1. Read all `metrics/v*.md` and `metrics/bootstrap.md` files (if present). Parse each file's frontmatter.
+
+2. Sort by version descending (bootstrap sorts last).
+
+3. Regenerate `metrics/SUMMARY.md` with this structure (exact formatting):
+
+   ````markdown
+   # Playbook Metrics
+
+   | Version | First-pass | Fixes | Top failure       | Cost   | Date       |
+   |---------|-----------:|------:|-------------------|-------:|------------|
+   | <rows — one per metrics file>                                                   |
+
+   ## Current top failure modes (last 3 versions)
+
+   <numbered list — sum of failure counts across the 3 most recent versions, ranked desc, with `(N fixes, M% of failures)` per line>
+
+   ## Trends
+
+   <one line per failure tag that appears in at least 2 of the last 3 versions, showing `tag: N → N → N (direction-label)`>
+   ````
+
+   Direction labels for the trends section:
+   - **improving** — strictly decreasing across the window.
+   - **not improving** — flat or increasing with a nonzero final value.
+   - **steady** — same value in each window position.
+   - **noisy** — no clear monotonic trend (mixed direction).
+
+   "First-pass" column renders as `first_pass_clean / issues` as a percentage rounded to the nearest whole percent.
+
+   "Top failure" is the highest-count key in each version's `failures` dict. If `failures` is empty or missing, write `—`.
+
+4. Commit both files:
+
+   ```bash
+   git add metrics/<version>.md metrics/SUMMARY.md
+   git commit -m "chore: record metrics for <version>"
+   ```
+
+   This is a separate commit on `main` after the merge has landed (Step 4 already merged).
+
 ### Step 5 — Clean up
 
 1. Delete the fix branch:
