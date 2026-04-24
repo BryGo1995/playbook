@@ -569,8 +569,8 @@ Once the user approves the full issue set:
 
 4. **Commit the metrics file** — if `metrics.enabled` is true and `metrics/vX.Y.md` was written in Phase 4, commit it:
    ```bash
-   git add metrics/vX.Y.md
-   git commit -m "chore: record structural check for vX.Y"
+   git add metrics/<version>.md
+   git commit -m "chore: record structural check for <version>"
    ```
 
    Substitute `vX.Y` with the actual version label (or `bootstrap`). This keeps the metrics commit atomic and lets git history show when structural-check data was captured.
