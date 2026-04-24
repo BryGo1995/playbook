@@ -620,7 +620,7 @@ Reuse the input bundle gathered by Step 4.5 (tracking issue body, fix commit pat
    fi
    ```
 
-5. If the payload has `error: classifier-exceeded-budget-or-failed`, treat as `CLASSIFIER_FAILED=true`.
+5. If `CLASSIFIER_FAILED` is not yet true AND the payload contains `error: classifier-exceeded-budget-or-failed`, set `CLASSIFIER_FAILED=true`.
 
 #### Write the classification section
 
@@ -637,7 +637,7 @@ Append (or replace, if it already exists as a `_Not yet run_` placeholder from g
 
 - If the fix has a secondary tag, add `| secondary: <tag>` after primary.
 
-Update the frontmatter: set `failures`, `iterations`, `fixes_total`, `first_pass_clean`, and add `cost_usd` by summing the classifier's cost (from the `claude -p` envelope's `total_cost_usd` field) into any existing value.
+Update the frontmatter: set `failures`, `iterations`, `fixes_total`, `first_pass_clean`. Add the classifier's cost (from the `claude -p` envelope's `total_cost_usd` field) to any existing `cost_usd` value in the frontmatter.
 
 If `CLASSIFIER_FAILED=true`, write this in place of the normal section:
 
