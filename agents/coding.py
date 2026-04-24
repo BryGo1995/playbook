@@ -42,7 +42,7 @@ class CodingAgent:
         issue_number: int,
         repo: str,
         integration_branch: str = "ai/dev",
-        max_budget_usd: float = 2.0,
+        max_budget_usd: float = 3.0,
     ) -> list[str]:
         prompt = self.build_prompt(issue_title, issue_body, issue_number, repo, integration_branch)
         return build_claude_command(
