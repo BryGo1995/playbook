@@ -40,3 +40,8 @@ learning:
   project_distiller: true
   agent_craft_distiller: true
   playbook_repo: "BryGo1995/playbook"
+
+metrics:
+  enabled: true                    # master switch; set false to disable all metrics
+  show_checks: false               # echo structural check + classification summaries to user; default false (for distribution)
+  classification_budget_usd: 0.25  # per-version cap for the classification subagent
