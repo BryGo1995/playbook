@@ -620,7 +620,15 @@ Reuse the input bundle gathered by Step 4.5 (tracking issue body, fix commit pat
    fi
    ```
 
-5. If `CLASSIFIER_FAILED` is not yet true AND the payload contains `error: classifier-exceeded-budget-or-failed`, set `CLASSIFIER_FAILED=true`.
+5. If `CLASSIFIER_FAILED` is not yet true, check for the classifier's error-fallback payload explicitly:
+   ```bash
+   if [ "${CLASSIFIER_FAILED:-false}" != "true" ]; then
+     ERROR_KEY=$(echo "$PAYLOAD" | jq -r '.error // empty')
+     if [ -n "$ERROR_KEY" ]; then
+       CLASSIFIER_FAILED=true
+     fi
+   fi
+   ```
 
 #### Write the classification section
 

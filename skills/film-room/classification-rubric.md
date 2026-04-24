@@ -69,8 +69,8 @@ Return a single JSON object, no prose, no code fences:
   "summary": {
     "failures": {"gameplan-criteria": 4, "coding-misread": 2, "gdd-gap": 1},
     "iterations": {"design-change": 2},
-    "total_fixes": 9,
-    "first_pass_clean_issues": 1
+    "fixes_total": 9,
+    "first_pass_clean": 1
   }
 }
 ```

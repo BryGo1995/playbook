@@ -19,7 +19,7 @@ Emit ONE JSON object, nothing else. No prose. No code fences. No leading or trai
 If you cannot produce a valid JSON object within the budget, emit this literal fallback as your final output:
 
 ```json
-{"error": "classifier-exceeded-budget-or-failed", "fixes": [], "summary": {"failures": {}, "iterations": {}, "total_fixes": 0, "first_pass_clean_issues": 0}}
+{"error": "classifier-exceeded-budget-or-failed", "fixes": [], "summary": {"failures": {}, "iterations": {}, "fixes_total": 0, "first_pass_clean": 0}}
 ```
 
 Film-room treats this fallback as "classification unavailable" and writes a note to the metrics file without blocking the session.
