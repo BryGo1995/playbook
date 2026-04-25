@@ -86,25 +86,28 @@ jobs:
       - name: Build PR body
         if: steps.check-ahead.outputs.ahead != '0'
         id: build-body
+        env:
+          INTEGRATION: ${{ inputs.integration_branch }}
+          BASE: ${{ inputs.base_branch }}
+          FOUND: ${{ steps.extract-refs.outputs.found }}
+          CLOSES_LINES: ${{ steps.extract-refs.outputs.closes_lines }}
+          COMMITS: ${{ steps.extract-refs.outputs.commits }}
         run: |
-          INTEGRATION="${{ inputs.integration_branch }}"
-          BASE="${{ inputs.base_branch }}"
-
           {
             echo "body<<BODY_EOF"
             echo "## Merge \`${INTEGRATION}\` -> \`${BASE}\`"
             echo ""
-            if [ "${{ steps.extract-refs.outputs.found }}" = "true" ]; then
+            if [ "$FOUND" = "true" ]; then
               echo "### Completed Issues"
               echo ""
-              echo -e "${{ steps.extract-refs.outputs.closes_lines }}"
+              echo -e "$CLOSES_LINES"
             else
               echo "_No issue references found in commits._"
               echo ""
             fi
             echo "### Commits"
             echo ""
-            echo '${{ steps.extract-refs.outputs.commits }}' | while IFS= read -r line; do
+            echo "$COMMITS" | while IFS= read -r line; do
               [ -n "$line" ] && echo "- $line"
             done
             echo ""
