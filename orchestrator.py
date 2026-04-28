@@ -325,7 +325,7 @@ class Orchestrator:
             issue_number=issue["number"],
             repo=issue["repo"],
             integration_branch=integration_branch,
-            max_budget_usd=budget_override if budget_override is not None else 3.0,
+            max_budget_usd=budget_override if budget_override is not None else self.config.get("versioning", {}).get("coding_max_budget_usd", 5.0),
         )
         log_path = self.state.log_path(issue["repo"], issue["number"])
         log_file = open(log_path, "w")
