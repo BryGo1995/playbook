@@ -838,3 +838,34 @@ def test_complete_issues_tolerates_snapshot_cleanup_failure(
     # Issue still advanced to Done
     update_status_calls = mock_gh.update_status.call_args_list
     assert any(call.args[1] == config["statuses"]["done"] for call in update_status_calls)
+
+
+@patch("orchestrator.subprocess.run")
+@patch("orchestrator.GitHubClient")
+def test_complete_issues_skips_cleanup_when_no_snapshots_exist(
+    MockGH, MockRun, config, state_dir
+):
+    """Common case: first-attempt success has no snapshots — no push --delete attempted."""
+    mock_gh = MockGH.return_value
+    mock_issue = {
+        "number": 42, "title": "[v0.1] Bug", "body": "",
+        "repo": "owner/repo", "project_item_id": "item_1", "status": "ai-complete",
+    }
+    mock_gh.fetch_issues_by_status.side_effect = lambda s: [mock_issue] if s == "ai-complete" else []
+    mock_gh.find_pr_for_branch.return_value = 100
+    mock_gh.merge_pr.return_value = True
+
+    MockRun.side_effect = [
+        _make_completed_process(0),                      # branch -D
+        _make_completed_process(0, stdout=""),           # ls-remote returns nothing
+        # No push --delete should run
+    ]
+
+    orch = Orchestrator(config, state_dir=state_dir)
+    orch._process_complete_issues()
+
+    delete_calls = [
+        c for c in MockRun.call_args_list
+        if "push" in c.args[0] and "--delete" in c.args[0]
+    ]
+    assert len(delete_calls) == 0
