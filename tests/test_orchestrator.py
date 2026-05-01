@@ -659,6 +659,45 @@ def test_dispatch_coding_retry_includes_context_block_with_snapshot_and_history(
     assert "ai/issue-42-attempt-1" in prompt
     assert "src/foo.py | 5" in prompt
     assert "[ai-coding-agent: stop attempt=2]" in prompt
+    # Regression guard: must call with attempt - 1, not attempt
+    mock_gh.get_latest_agent_stop_comment.assert_called_once_with("owner/repo", 42, 1)
+
+
+@patch("orchestrator.subprocess.run")
+@patch("orchestrator.subprocess.Popen")
+@patch("orchestrator.GitHubClient")
+def test_dispatch_coding_retry_threads_stop_comment_into_prompt(
+    MockGH, MockPopen, MockRun, config, state_dir
+):
+    """Regression guard: non-None stop_comment must reach the rendered prompt."""
+    mock_gh = MockGH.return_value
+    mock_issue = _mock_issue(42, "[v0.1] Bug", "Body")
+    mock_gh.fetch_issues_by_status.side_effect = lambda s: [mock_issue] if s == "ai-ready" else []
+    mock_gh.get_attempt_count.return_value = 1
+    mock_gh.get_attempt_failure_history.return_value = [
+        {"attempt": 1, "kind": "no-pr", "reason": "no PR opened",
+         "snapshot_ref": "ai/issue-42-attempt-1", "wip_ref": None,
+         "log_path": "x", "ts": "2026-05-01T00:00:00Z"},
+    ]
+    mock_gh.get_latest_agent_stop_comment.return_value = (
+        "Stopping: ambiguity in the auth requirements"
+    )
+
+    MockRun.side_effect = [
+        _make_completed_process(0, stdout="abc\trefs/heads/ai/issue-42-attempt-1\n"),
+        _make_completed_process(0, stdout=" src/foo.py | 1 +"),
+    ]
+
+    mock_proc = MagicMock(); mock_proc.pid = 12349
+    MockPopen.return_value = mock_proc
+
+    orch = Orchestrator(config, state_dir=state_dir)
+    orch._process_ready_issues()
+
+    cmd = MockPopen.call_args.args[0]
+    prompt = cmd[-1]
+    assert "Stopping: ambiguity in the auth requirements" in prompt
+    assert "Latest attempt's reasoning" in prompt
 
 
 @patch("orchestrator.subprocess.run")
