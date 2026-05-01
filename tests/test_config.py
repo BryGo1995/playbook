@@ -195,3 +195,19 @@ metrics:
     assert cfg["metrics"]["enabled"] is True  # inherited
     assert cfg["metrics"]["show_checks"] is True  # overridden
     assert cfg["metrics"]["classification_budget_usd"] == 0.25  # inherited
+
+
+def test_snapshot_on_failure_default(tmp_path):
+    """guardrails.snapshot_on_failure defaults to True."""
+    import shutil
+    defaults_dir = tmp_path / "playbook"
+    defaults_dir.mkdir()
+    real_defaults = os.path.join(os.path.dirname(os.path.dirname(__file__)), "defaults.yaml")
+    shutil.copy(real_defaults, defaults_dir / "defaults.yaml")
+
+    project_dir = tmp_path / "my-project"
+    project_dir.mkdir()
+    (project_dir / "playbook.yaml").write_text("repo: owner/my-project\n")
+
+    cfg = load_config(project_dir=str(project_dir), defaults_path=str(defaults_dir / "defaults.yaml"))
+    assert cfg["guardrails"]["snapshot_on_failure"] is True

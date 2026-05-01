@@ -14,6 +14,7 @@ timeouts:
 guardrails:
   max_files_changed: 10
   max_retry_cycles: 3
+  snapshot_on_failure: true
 
 versioning:
   enabled: true
