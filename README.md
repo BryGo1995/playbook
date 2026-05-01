@@ -206,6 +206,30 @@ When agents merge into `ai/dev`, a GitHub Action creates or updates a PR targeti
 - **Draft PRs only** — agents never merge to `main`
 - **Tool restrictions** — review agent is read-only; testing agent can only write test files
 
+### Snapshot refs on coding-agent failure
+
+When a coding agent times out or exits without creating a PR, the orchestrator
+pushes a forensic snapshot of the working tree as one or two remote refs:
+
+- `ai/issue-N-attempt-K` — the committed branch state at failure.
+- `ai/issue-N-attempt-K-wip` — uncommitted/untracked state captured via stash
+  (only present if the working tree was dirty).
+
+Subsequent retries read these refs to feed prior-attempt context into the new
+agent's prompt. Successful auto-merge cleans up all `ai/issue-N-attempt-*` refs
+for the issue. Issues that hit max retries leave their snapshots in place as
+forensic evidence.
+
+**Operational notes:**
+
+- The `ai/issue-*` namespace must remain unprotected (no force-push protection)
+  for snapshots to function. If protection blocks the snapshot push, the failure
+  is recorded as `snapshot: unavailable` and recovery still proceeds.
+- Toggle off via `guardrails.snapshot_on_failure: false` in `defaults.yaml` or
+  the project's `playbook.yaml`.
+- The first time an existing issue retries after this feature ships, it has no
+  prior snapshots — that is expected, not a bug.
+
 ### Slack Notifications
 
 | Event | When |
