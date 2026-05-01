@@ -372,6 +372,11 @@ def test_snapshot_branch_happy_path(MockGH, MockRun, config, state_dir):
     assert result["status"] == "ok"
     assert result["snapshot_ref"] == "ai/issue-42-attempt-1"
     assert result["wip_ref"] == "ai/issue-42-attempt-1-wip"
+    # Assert all 6 git commands ran (the 6th is the safety-critical stash drop)
+    assert MockRun.call_count == 6
+    # Confirm the last call is the stash drop
+    last_call_args = MockRun.call_args_list[-1].args[0]
+    assert last_call_args == ["git", "stash", "drop"]
 
 
 @patch("orchestrator.subprocess.run")
@@ -413,6 +418,10 @@ def test_snapshot_branch_partial_when_stash_push_fails(MockGH, MockRun, config, 
     assert result["status"] == "partial"
     assert result["snapshot_ref"] == "ai/issue-42-attempt-2"
     assert result["wip_ref"] is None
+    # Stash drop must still run even though wip push failed
+    assert MockRun.call_count == 6
+    last_call_args = MockRun.call_args_list[-1].args[0]
+    assert last_call_args == ["git", "stash", "drop"]
 
 
 @patch("orchestrator.subprocess.run")
@@ -452,3 +461,31 @@ def test_snapshot_branch_no_dirty_state_succeeds_with_no_wip(MockGH, MockRun, co
     assert result["status"] == "ok"
     assert result["snapshot_ref"] == "ai/issue-42-attempt-1"
     assert result["wip_ref"] is None
+
+
+@patch("orchestrator.subprocess.run")
+@patch("orchestrator.GitHubClient")
+def test_snapshot_branch_dirty_tree_stash_dropped_when_branch_push_fails(
+    MockGH, MockRun, config, state_dir
+):
+    """Dirty tree + branch push fails → stash drop must STILL run (safety invariant)."""
+    MockGH.return_value = MagicMock()
+    MockRun.side_effect = [
+        _make_completed_process(0),                                   # rev-parse branch
+        _make_completed_process(0, stdout="stashed."),                # stash push (created)
+        _make_completed_process(0, stdout="abc123\n"),                # rev-parse stash@{0}
+        _make_completed_process(returncode=1, stderr="auth failed"),  # push branch (fail)
+        # NOTE: no wip push — guarded by `result["snapshot_ref"] is not None`
+        _make_completed_process(0),                                   # stash drop (must run)
+    ]
+    orch = Orchestrator(config, state_dir=state_dir)
+
+    result = orch._snapshot_branch("owner/repo", 42, attempt=1)
+
+    assert result["status"] == "unavailable"
+    assert result["snapshot_ref"] is None
+    assert result["wip_ref"] is None
+    # Verify the stash drop ran — this is the safety invariant
+    assert MockRun.call_count == 5
+    last_call_args = MockRun.call_args_list[-1].args[0]
+    assert last_call_args == ["git", "stash", "drop"]
