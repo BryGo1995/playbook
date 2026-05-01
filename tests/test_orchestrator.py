@@ -557,6 +557,9 @@ def test_handle_completion_no_pr_calls_snapshot_and_posts_structured_comment(
     posted_bodies = [c.kwargs.get("body") or c.args[2] for c in mock_gh.add_comment.call_args_list]
     assert any('"kind": "no-pr"' in b for b in posted_bodies)
     assert any('"attempt": 2' in b for b in posted_bodies)
+    # Snapshot ref must appear in the posted comment — proves the snapshot result
+    # actually flows into serialize_failure_comment (not silently discarded)
+    assert any("ai/issue-42-attempt-2" in b for b in posted_bodies)
 
 
 @patch("orchestrator.subprocess.run")

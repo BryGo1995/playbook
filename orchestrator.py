@@ -90,7 +90,6 @@ class Orchestrator:
         return elapsed > agent["timeout_minutes"]
 
     def _handle_timeout(self, agent: dict):
-        from datetime import datetime, timezone
         from prior_attempt import serialize_failure_comment
 
         pid = agent["pid"]
@@ -159,7 +158,6 @@ class Orchestrator:
 
         # For coding agents, verify a PR was actually created before advancing
         if agent["type"] == "coding":
-            from datetime import datetime, timezone
             from prior_attempt import serialize_failure_comment
 
             pr_branch = f"ai/issue-{issue_number}"
