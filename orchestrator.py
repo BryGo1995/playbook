@@ -90,11 +90,15 @@ class Orchestrator:
         return elapsed > agent["timeout_minutes"]
 
     def _handle_timeout(self, agent: dict):
+        from datetime import datetime, timezone
+        from prior_attempt import serialize_failure_comment
+
         pid = agent["pid"]
         issue = agent["issue"]
         repo = agent["repo"]
         issue_number = int(issue.split("#")[1])
         project_item_id = agent.get("project_item_id")
+        attempt = agent["attempt"]
 
         logger.warning(f"Agent timed out: {issue} (pid={pid})")
         try:
@@ -102,9 +106,37 @@ class Orchestrator:
         except (OSError, ProcessLookupError):
             pass
 
+        # Take a snapshot, if enabled
+        snapshot_ref = None
+        wip_ref = None
+        snapshot_status = "skipped"
+        if self.config.get("guardrails", {}).get("snapshot_on_failure", True):
+            snap = self._snapshot_branch(repo, issue_number, attempt)
+            snapshot_ref = snap["snapshot_ref"]
+            wip_ref = snap["wip_ref"]
+            snapshot_status = snap["status"]
+
         if project_item_id:
             self.gh.update_status(project_item_id, self.statuses["error"])
-        self.gh.add_comment(repo, issue_number, f"[agent-orchestrator] Agent timed out after {agent['timeout_minutes']} minutes.")
+
+        if snapshot_status == "skipped":
+            # Legacy comment
+            self.gh.add_comment(
+                repo, issue_number,
+                f"[agent-orchestrator] Agent timed out after {agent['timeout_minutes']} minutes."
+            )
+        else:
+            body = serialize_failure_comment(
+                attempt=attempt,
+                kind="timeout",
+                reason=f"Agent timed out after {agent['timeout_minutes']} minutes",
+                snapshot_ref=snapshot_ref,
+                wip_ref=wip_ref,
+                log_path=self.state.logs_dir,
+                ts=datetime.now(timezone.utc).isoformat(),
+            )
+            self.gh.add_comment(repo, issue_number, body)
+
         self.slack.notify_timeout(issue, agent["timeout_minutes"])
         self.state.remove_agent(pid)
 
@@ -127,13 +159,42 @@ class Orchestrator:
 
         # For coding agents, verify a PR was actually created before advancing
         if agent["type"] == "coding":
+            from datetime import datetime, timezone
+            from prior_attempt import serialize_failure_comment
+
             pr_branch = f"ai/issue-{issue_number}"
             pr_number = self.gh.find_pr_for_branch(repo, pr_branch)
             if pr_number is None:
                 logger.warning(f"Coding agent exited without creating PR for {issue}")
-                self.gh.add_comment(repo, issue_number,
-                    f"[agent-orchestrator] Attempt {agent['attempt']} completed ({agent['type']} agent) "
-                    f"but no PR found on branch `{pr_branch}`. Marking as error.")
+                attempt = agent["attempt"]
+
+                snapshot_ref = None
+                wip_ref = None
+                snapshot_status = "skipped"
+                if self.config.get("guardrails", {}).get("snapshot_on_failure", True):
+                    snap = self._snapshot_branch(repo, issue_number, attempt)
+                    snapshot_ref = snap["snapshot_ref"]
+                    wip_ref = snap["wip_ref"]
+                    snapshot_status = snap["status"]
+
+                if snapshot_status == "skipped":
+                    self.gh.add_comment(
+                        repo, issue_number,
+                        f"[agent-orchestrator] Attempt {attempt} completed (coding agent) "
+                        f"but no PR found on branch `{pr_branch}`. Marking as error."
+                    )
+                else:
+                    body = serialize_failure_comment(
+                        attempt=attempt,
+                        kind="no-pr",
+                        reason=f"Coding agent completed but no PR found on branch {pr_branch}",
+                        snapshot_ref=snapshot_ref,
+                        wip_ref=wip_ref,
+                        log_path=self.state.logs_dir,
+                        ts=datetime.now(timezone.utc).isoformat(),
+                    )
+                    self.gh.add_comment(repo, issue_number, body)
+
                 if project_item_id:
                     self.gh.update_status(project_item_id, self.statuses["error"])
                 self.slack.notify_error(issue, "Coding agent exited without creating a PR")

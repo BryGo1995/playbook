@@ -489,3 +489,103 @@ def test_snapshot_branch_dirty_tree_stash_dropped_when_branch_push_fails(
     assert MockRun.call_count == 5
     last_call_args = MockRun.call_args_list[-1].args[0]
     assert last_call_args == ["git", "stash", "drop"]
+
+
+@patch("orchestrator.subprocess.run")
+@patch("orchestrator.GitHubClient")
+def test_handle_timeout_calls_snapshot_and_posts_structured_comment(
+    MockGH, MockRun, config, state_dir
+):
+    mock_gh = MockGH.return_value
+    # Snapshot subprocess sequence: rev-parse, stash, push branch (clean tree)
+    MockRun.side_effect = [
+        _make_completed_process(0),
+        _make_completed_process(0, stdout="No local changes to save."),
+        _make_completed_process(0),
+    ]
+    orch = Orchestrator(config, state_dir=state_dir)
+    agent = {
+        "pid": 99999,
+        "issue": "owner/repo#42",
+        "repo": "owner/repo",
+        "type": "coding",
+        "started_at": "2026-05-01T00:00:00+00:00",
+        "timeout_minutes": 60,
+        "attempt": 1,
+        "project_item_id": "item_1",
+    }
+    orch.state.agents = [agent]
+
+    with patch("os.kill"):
+        orch._handle_timeout(agent)
+
+    # The comment posted to the issue must contain the structured failure JSON
+    posted_bodies = [c.kwargs.get("body") or c.args[2] for c in mock_gh.add_comment.call_args_list]
+    assert any('"kind": "timeout"' in b for b in posted_bodies)
+    assert any('"attempt": 1' in b for b in posted_bodies)
+    assert any("ai/issue-42-attempt-1" in b for b in posted_bodies)
+
+
+@patch("orchestrator.subprocess.run")
+@patch("orchestrator.GitHubClient")
+def test_handle_completion_no_pr_calls_snapshot_and_posts_structured_comment(
+    MockGH, MockRun, config, state_dir
+):
+    mock_gh = MockGH.return_value
+    mock_gh.find_pr_for_branch.return_value = None  # mode b: no PR
+    MockRun.side_effect = [
+        _make_completed_process(0),
+        _make_completed_process(0, stdout="No local changes to save."),
+        _make_completed_process(0),
+    ]
+    orch = Orchestrator(config, state_dir=state_dir)
+    agent = {
+        "pid": 99998,
+        "issue": "owner/repo#42",
+        "repo": "owner/repo",
+        "type": "coding",
+        "started_at": "2026-05-01T00:00:00+00:00",
+        "timeout_minutes": 60,
+        "attempt": 2,
+        "project_item_id": "item_1",
+    }
+    orch.state.agents = [agent]
+
+    # _handle_completion checks os.kill via _is_process_alive — bypass via direct call
+    orch._handle_completion(agent)
+
+    posted_bodies = [c.kwargs.get("body") or c.args[2] for c in mock_gh.add_comment.call_args_list]
+    assert any('"kind": "no-pr"' in b for b in posted_bodies)
+    assert any('"attempt": 2' in b for b in posted_bodies)
+
+
+@patch("orchestrator.subprocess.run")
+@patch("orchestrator.GitHubClient")
+def test_handle_timeout_skips_snapshot_when_feature_flag_disabled(
+    MockGH, MockRun, config, state_dir
+):
+    config["guardrails"]["snapshot_on_failure"] = False
+    mock_gh = MockGH.return_value
+    orch = Orchestrator(config, state_dir=state_dir)
+    agent = {
+        "pid": 99997,
+        "issue": "owner/repo#42",
+        "repo": "owner/repo",
+        "type": "coding",
+        "started_at": "2026-05-01T00:00:00+00:00",
+        "timeout_minutes": 60,
+        "attempt": 1,
+        "project_item_id": "item_1",
+    }
+    orch.state.agents = [agent]
+
+    with patch("os.kill"):
+        orch._handle_timeout(agent)
+
+    # No subprocess calls (no snapshot attempted)
+    assert MockRun.call_count == 0
+    # Legacy unstructured comment still posted
+    posted_bodies = [c.kwargs.get("body") or c.args[2] for c in mock_gh.add_comment.call_args_list]
+    assert any("timed out" in b for b in posted_bodies)
+    # No JSON block in any comment
+    assert not any("```json" in b for b in posted_bodies)
