@@ -293,6 +293,24 @@ class GitHubClient:
             and "coding agent" in c["body"]
         )
 
+    def get_attempt_failure_history(self, repo_name: str, issue_number: int) -> list[dict]:
+        """Walk issue comments, return parsed failure-diagnostic dicts sorted by attempt."""
+        from prior_attempt import parse_failure_comment, ORCHESTRATOR_TAG
+
+        owner, repo = repo_name.split("/")
+        comments = self._rest_get(f"/repos/{owner}/{repo}/issues/{issue_number}/comments")
+        entries: list[dict] = []
+        for c in comments:
+            body = c.get("body", "")
+            if not body.startswith(ORCHESTRATOR_TAG):
+                continue
+            parsed = parse_failure_comment(body)
+            if parsed is None:
+                continue
+            entries.append(parsed)
+        entries.sort(key=lambda e: e.get("attempt", 0))
+        return entries
+
     # --- PR operations (REST API) ---
 
     def _get_pr_node_id(self, repo_name: str, pr_number: int) -> str | None:

@@ -153,3 +153,68 @@ def test_fetch_all_project_issues(client):
     assert issues[0]["title"] == "[v0.1] Feature A"
     assert issues[0]["status"] == "ai-ready"
     assert issues[1]["status"] == "Done"
+
+
+def test_get_attempt_failure_history_parses_structured_comments(client):
+    mock_resp = MagicMock()
+    mock_resp.json.return_value = [
+        {"body": (
+            "[agent-orchestrator] Attempt 1 failed: timeout.\n\n"
+            "<details><summary>diagnostic</summary>\n\n"
+            "```json\n"
+            '{"attempt": 1, "kind": "timeout", "reason": "timed out", '
+            '"snapshot_ref": "ai/issue-42-attempt-1", "wip_ref": null, '
+            '"log_path": ".playbook/logs/a.json", "ts": "2026-05-01T01:00:00Z"}\n'
+            "```\n\n</details>"
+        )},
+        {"body": "Just a human comment"},
+        {"body": (
+            "[agent-orchestrator] Attempt 2 failed: no-pr.\n\n"
+            "<details><summary>diagnostic</summary>\n\n"
+            "```json\n"
+            '{"attempt": 2, "kind": "no-pr", "reason": "no PR", '
+            '"snapshot_ref": "ai/issue-42-attempt-2", "wip_ref": "ai/issue-42-attempt-2-wip", '
+            '"log_path": ".playbook/logs/b.json", "ts": "2026-05-01T02:00:00Z"}\n'
+            "```\n\n</details>"
+        )},
+    ]
+    mock_resp.raise_for_status = MagicMock()
+    client._mock_requests.get.return_value = mock_resp
+
+    history = client.get_attempt_failure_history("owner/repo", 42)
+    assert len(history) == 2
+    assert history[0]["attempt"] == 1
+    assert history[1]["attempt"] == 2
+    assert history[1]["kind"] == "no-pr"
+
+
+def test_get_attempt_failure_history_drops_malformed_json(client):
+    mock_resp = MagicMock()
+    mock_resp.json.return_value = [
+        {"body": "[agent-orchestrator] Attempt 1 failed.\n\n```json\n{not valid\n```"},
+        {"body": (
+            "[agent-orchestrator] Attempt 2 failed.\n\n```json\n"
+            '{"attempt": 2, "kind": "timeout", "reason": "x", "snapshot_ref": null, '
+            '"wip_ref": null, "log_path": "", "ts": ""}\n```'
+        )},
+    ]
+    mock_resp.raise_for_status = MagicMock()
+    client._mock_requests.get.return_value = mock_resp
+
+    history = client.get_attempt_failure_history("owner/repo", 42)
+    assert len(history) == 1
+    assert history[0]["attempt"] == 2
+
+
+def test_get_attempt_failure_history_empty_for_legacy_only_comments(client):
+    """Old-format comments (no JSON block) yield empty history — backward compat."""
+    mock_resp = MagicMock()
+    mock_resp.json.return_value = [
+        {"body": "[agent-orchestrator] Attempt 1 completed (coding agent)."},
+        {"body": "[agent-orchestrator] Agent timed out after 60 minutes."},
+    ]
+    mock_resp.raise_for_status = MagicMock()
+    client._mock_requests.get.return_value = mock_resp
+
+    history = client.get_attempt_failure_history("owner/repo", 42)
+    assert history == []
