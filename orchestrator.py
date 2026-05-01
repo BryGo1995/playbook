@@ -2,7 +2,6 @@
 import os
 import signal
 import subprocess
-import sys
 from datetime import datetime, timezone
 
 from config import load_config

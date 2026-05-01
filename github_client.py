@@ -2,7 +2,6 @@
 import os
 import requests
 
-ORCHESTRATOR_TAG = "[agent-orchestrator]"
 GITHUB_GRAPHQL_URL = "https://api.github.com/graphql"
 
 
@@ -289,7 +288,7 @@ class GitHubClient:
         a structured failure JSON block AND a legacy completion comment. Falls back
         to legacy substring matching for comments predating the structured format.
         """
-        from prior_attempt import parse_failure_comment
+        from prior_attempt import parse_failure_comment, ORCHESTRATOR_TAG
         import re
 
         owner, repo = repo_name.split("/")

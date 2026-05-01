@@ -138,6 +138,7 @@ def test_respects_concurrency_limit(MockGH, MockPopen, config, state_dir):
 
 @patch("orchestrator.GitHubClient")
 def test_handles_timed_out_agent(MockGH, config, state_dir):
+    config["guardrails"]["snapshot_on_failure"] = False
     mock_gh = MockGH.return_value
     mock_gh.fetch_issues_by_status.return_value = []
 
