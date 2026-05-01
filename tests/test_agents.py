@@ -116,3 +116,48 @@ def test_review_agent_restricted_tools():
     allowed = cmd[tool_idx]
     assert "Edit" not in allowed
     assert "Write" not in allowed
+
+
+def test_coding_prompt_first_attempt_has_no_context_block():
+    from agents.coding import CodingAgent
+    agent = CodingAgent()
+    prompt = agent.build_prompt(
+        issue_title="Fix bug",
+        issue_body="body",
+        issue_number=42,
+        repo="owner/repo",
+        integration_branch="ai/dev",
+        attempt=1,
+        prior_attempt_context="",
+    )
+    assert "Prior Attempt Context" not in prompt
+    # Stop-tag instruction is rendered with attempt number
+    assert "[ai-coding-agent: stop attempt=1]" in prompt
+
+
+def test_coding_prompt_retry_includes_context_block():
+    from agents.coding import CodingAgent
+    agent = CodingAgent()
+    context = "## Prior Attempt Context\n\nThis is your attempt 2..."
+    prompt = agent.build_prompt(
+        issue_title="Fix bug",
+        issue_body="body",
+        issue_number=42,
+        repo="owner/repo",
+        integration_branch="ai/dev",
+        attempt=2,
+        prior_attempt_context=context,
+    )
+    assert "## Prior Attempt Context" in prompt
+    assert "[ai-coding-agent: stop attempt=2]" in prompt
+
+
+def test_coding_prompt_default_attempt_is_1_and_no_context():
+    """Backward compat: existing callers pass no attempt/context → attempt 1, empty block."""
+    from agents.coding import CodingAgent
+    agent = CodingAgent()
+    prompt = agent.build_prompt(
+        issue_title="t", issue_body="b", issue_number=1, repo="o/r",
+    )
+    assert "Prior Attempt Context" not in prompt
+    assert "[ai-coding-agent: stop attempt=1]" in prompt

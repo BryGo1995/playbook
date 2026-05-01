@@ -6,7 +6,7 @@ CODING_PROMPT = """You are a coding agent working on GitHub issue {repo}#{issue_
 ## Issue: {issue_title}
 
 {issue_body}
-
+{prior_attempt_context}
 ## Instructions
 
 1. Start from a clean state: run `git fetch origin && git checkout {integration_branch} && git reset --hard origin/{integration_branch}`. Delete any existing local branch `ai/issue-{issue_number}` if present (`git branch -D ai/issue-{issue_number}` — ignore errors). Then create a fresh feature branch: `git checkout -b ai/issue-{issue_number}`.
@@ -16,7 +16,7 @@ CODING_PROMPT = """You are a coding agent working on GitHub issue {repo}#{issue_
 5. If the project has a linter configured (e.g., ruff, eslint), run it and fix any issues before proceeding.
 6. Open a draft pull request targeting `{integration_branch}`, linking to issue #{issue_number}.
 7. Keep changes focused — modify no more than 10 files.
-8. If the requirements are ambiguous or you cannot proceed, stop and explain why in a comment.
+8. If the requirements are ambiguous or you cannot proceed, stop and explain why in a comment. Prefix that comment with `[ai-coding-agent: stop attempt={attempt}]` so future attempts can find your reasoning.
 
 IMPORTANT: Branch from `{integration_branch}`, NOT from `main`. Target the PR to `{integration_branch}`.
 Do NOT merge anything. Draft PR only.
@@ -26,13 +26,26 @@ ALLOWED_TOOLS = ["Edit", "Write", "Bash", "Read", "Glob", "Grep"]
 
 
 class CodingAgent:
-    def build_prompt(self, issue_title: str, issue_body: str, issue_number: int, repo: str, integration_branch: str = "ai/dev") -> str:
+    def build_prompt(
+        self,
+        issue_title: str,
+        issue_body: str,
+        issue_number: int,
+        repo: str,
+        integration_branch: str = "ai/dev",
+        attempt: int = 1,
+        prior_attempt_context: str = "",
+    ) -> str:
+        # Newline-pad the context block so it sits cleanly between body and instructions
+        ctx = f"\n{prior_attempt_context}" if prior_attempt_context else ""
         return CODING_PROMPT.format(
             repo=repo,
             issue_number=issue_number,
             issue_title=issue_title,
             issue_body=issue_body,
             integration_branch=integration_branch,
+            attempt=attempt,
+            prior_attempt_context=ctx,
         )
 
     def build_command(
@@ -43,8 +56,13 @@ class CodingAgent:
         repo: str,
         integration_branch: str = "ai/dev",
         max_budget_usd: float = 3.0,
+        attempt: int = 1,
+        prior_attempt_context: str = "",
     ) -> list[str]:
-        prompt = self.build_prompt(issue_title, issue_body, issue_number, repo, integration_branch)
+        prompt = self.build_prompt(
+            issue_title, issue_body, issue_number, repo, integration_branch,
+            attempt=attempt, prior_attempt_context=prior_attempt_context,
+        )
         return build_claude_command(
             prompt=prompt,
             allowed_tools=ALLOWED_TOOLS,
