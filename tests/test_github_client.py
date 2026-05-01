@@ -218,3 +218,41 @@ def test_get_attempt_failure_history_empty_for_legacy_only_comments(client):
 
     history = client.get_attempt_failure_history("owner/repo", 42)
     assert history == []
+
+
+def test_get_latest_agent_stop_comment_filters_by_attempt(client):
+    mock_resp = MagicMock()
+    mock_resp.json.return_value = [
+        {"body": "[ai-coding-agent: stop attempt=1] First stop reasoning."},
+        {"body": "[agent-orchestrator] Attempt 1 failed."},
+        {"body": "[ai-coding-agent: stop attempt=2] Second stop reasoning."},
+    ]
+    mock_resp.raise_for_status = MagicMock()
+    client._mock_requests.get.return_value = mock_resp
+
+    assert client.get_latest_agent_stop_comment("owner/repo", 42, 1) == "First stop reasoning."
+    assert client.get_latest_agent_stop_comment("owner/repo", 42, 2) == "Second stop reasoning."
+
+
+def test_get_latest_agent_stop_comment_returns_none_when_no_match(client):
+    mock_resp = MagicMock()
+    mock_resp.json.return_value = [
+        {"body": "[ai-coding-agent: stop attempt=1] reasoning."},
+    ]
+    mock_resp.raise_for_status = MagicMock()
+    client._mock_requests.get.return_value = mock_resp
+
+    assert client.get_latest_agent_stop_comment("owner/repo", 42, 3) is None
+
+
+def test_get_latest_agent_stop_comment_picks_most_recent_when_duplicates(client):
+    """If somehow two stop comments share an attempt, the later one wins."""
+    mock_resp = MagicMock()
+    mock_resp.json.return_value = [
+        {"body": "[ai-coding-agent: stop attempt=1] earlier"},
+        {"body": "[ai-coding-agent: stop attempt=1] later"},
+    ]
+    mock_resp.raise_for_status = MagicMock()
+    client._mock_requests.get.return_value = mock_resp
+
+    assert client.get_latest_agent_stop_comment("owner/repo", 42, 1) == "later"

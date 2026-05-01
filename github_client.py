@@ -311,6 +311,22 @@ class GitHubClient:
         entries.sort(key=lambda e: e.get("attempt", 0))
         return entries
 
+    def get_latest_agent_stop_comment(
+        self, repo_name: str, issue_number: int, attempt: int
+    ) -> str | None:
+        """Return the body (minus the tag) of the most recent stop comment for the given attempt."""
+        from prior_attempt import STOP_TAG_PREFIX
+
+        owner, repo = repo_name.split("/")
+        comments = self._rest_get(f"/repos/{owner}/{repo}/issues/{issue_number}/comments")
+        target_prefix = f"{STOP_TAG_PREFIX}{attempt}]"
+        match: str | None = None
+        for c in comments:
+            body = c.get("body", "")
+            if body.startswith(target_prefix):
+                match = body[len(target_prefix):].lstrip()
+        return match
+
     # --- PR operations (REST API) ---
 
     def _get_pr_node_id(self, repo_name: str, pr_number: int) -> str | None:
