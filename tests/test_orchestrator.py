@@ -592,3 +592,139 @@ def test_handle_timeout_skips_snapshot_when_feature_flag_disabled(
     assert any("timed out" in b for b in posted_bodies)
     # No JSON block in any comment
     assert not any("```json" in b for b in posted_bodies)
+
+
+@patch("orchestrator.subprocess.run")
+@patch("orchestrator.subprocess.Popen")
+@patch("orchestrator.GitHubClient")
+def test_dispatch_coding_first_attempt_has_no_context_in_prompt(
+    MockGH, MockPopen, MockRun, config, state_dir
+):
+    mock_gh = MockGH.return_value
+    mock_issue = _mock_issue(42, "[v0.1] Bug", "Body")
+    mock_gh.fetch_issues_by_status.side_effect = lambda s: [mock_issue] if s == "ai-ready" else []
+    mock_gh.get_attempt_count.return_value = 0  # first attempt
+    mock_proc = MagicMock()
+    mock_proc.pid = 12345
+    MockPopen.return_value = mock_proc
+
+    orch = Orchestrator(config, state_dir=state_dir)
+    orch._process_ready_issues()
+
+    # Inspect the prompt argument passed to claude
+    call_args = MockPopen.call_args
+    cmd = call_args.args[0]
+    prompt = cmd[-1]  # build_claude_command appends prompt last
+    assert "Prior Attempt Context" not in prompt
+    assert "[ai-coding-agent: stop attempt=1]" in prompt
+
+
+@patch("orchestrator.subprocess.run")
+@patch("orchestrator.subprocess.Popen")
+@patch("orchestrator.GitHubClient")
+def test_dispatch_coding_retry_includes_context_block_with_snapshot_and_history(
+    MockGH, MockPopen, MockRun, config, state_dir
+):
+    mock_gh = MockGH.return_value
+    mock_issue = _mock_issue(42, "[v0.1] Bug", "Body")
+    mock_gh.fetch_issues_by_status.side_effect = lambda s: [mock_issue] if s == "ai-ready" else []
+    mock_gh.get_attempt_count.return_value = 1  # this will be attempt 2
+    mock_gh.get_attempt_failure_history.return_value = [
+        {"attempt": 1, "kind": "timeout", "reason": "timed out at 60min",
+         "snapshot_ref": "ai/issue-42-attempt-1", "wip_ref": None,
+         "log_path": "x", "ts": "2026-05-01T00:00:00Z"},
+    ]
+    mock_gh.get_latest_agent_stop_comment.return_value = None
+
+    # ls-remote returns one snapshot ref (and no -wip)
+    MockRun.side_effect = [
+        _make_completed_process(0, stdout=(
+            "abc123\trefs/heads/ai/issue-42-attempt-1\n"
+        )),
+        # git diff --stat for the snapshot
+        _make_completed_process(0, stdout=" src/foo.py | 5 +++++\n 1 file changed, 5 insertions(+)\n"),
+    ]
+
+    mock_proc = MagicMock()
+    mock_proc.pid = 12346
+    MockPopen.return_value = mock_proc
+
+    orch = Orchestrator(config, state_dir=state_dir)
+    orch._process_ready_issues()
+
+    cmd = MockPopen.call_args.args[0]
+    prompt = cmd[-1]
+    assert "## Prior Attempt Context" in prompt
+    assert "Attempt 1: timeout" in prompt
+    assert "ai/issue-42-attempt-1" in prompt
+    assert "src/foo.py | 5" in prompt
+    assert "[ai-coding-agent: stop attempt=2]" in prompt
+
+
+@patch("orchestrator.subprocess.run")
+@patch("orchestrator.subprocess.Popen")
+@patch("orchestrator.GitHubClient")
+def test_dispatch_coding_retry_with_no_snapshots_uses_feedback_only_variant(
+    MockGH, MockPopen, MockRun, config, state_dir
+):
+    mock_gh = MockGH.return_value
+    mock_issue = _mock_issue(42, "[v0.1] Bug", "Body")
+    mock_gh.fetch_issues_by_status.side_effect = lambda s: [mock_issue] if s == "ai-ready" else []
+    mock_gh.get_attempt_count.return_value = 1
+    mock_gh.get_attempt_failure_history.return_value = [
+        {"attempt": 1, "kind": "timeout", "reason": "timed out",
+         "snapshot_ref": None, "wip_ref": None, "log_path": "", "ts": ""},
+    ]
+    mock_gh.get_latest_agent_stop_comment.return_value = None
+
+    MockRun.side_effect = [
+        _make_completed_process(0, stdout=""),  # ls-remote returns nothing
+    ]
+
+    mock_proc = MagicMock(); mock_proc.pid = 12347
+    MockPopen.return_value = mock_proc
+
+    orch = Orchestrator(config, state_dir=state_dir)
+    orch._process_ready_issues()
+
+    cmd = MockPopen.call_args.args[0]
+    prompt = cmd[-1]
+    assert "## Prior Attempt Context" in prompt
+    assert "no snapshot" in prompt.lower()
+    assert "feedback only" in prompt.lower()
+
+
+@patch("orchestrator.subprocess.run")
+@patch("orchestrator.subprocess.Popen")
+@patch("orchestrator.GitHubClient")
+def test_dispatch_coding_retry_picks_highest_attempt_excluding_wip(
+    MockGH, MockPopen, MockRun, config, state_dir
+):
+    """ls-remote returns mixed -wip and base refs; picks highest base K."""
+    mock_gh = MockGH.return_value
+    mock_issue = _mock_issue(42, "[v0.1] Bug", "Body")
+    mock_gh.fetch_issues_by_status.side_effect = lambda s: [mock_issue] if s == "ai-ready" else []
+    mock_gh.get_attempt_count.return_value = 2
+    mock_gh.get_attempt_failure_history.return_value = []
+    mock_gh.get_latest_agent_stop_comment.return_value = None
+
+    MockRun.side_effect = [
+        _make_completed_process(0, stdout=(
+            "aaa\trefs/heads/ai/issue-42-attempt-1\n"
+            "bbb\trefs/heads/ai/issue-42-attempt-2\n"
+            "ccc\trefs/heads/ai/issue-42-attempt-2-wip\n"
+        )),
+        _make_completed_process(0, stdout=" src/foo.py | 1 +"),
+    ]
+
+    mock_proc = MagicMock(); mock_proc.pid = 12348
+    MockPopen.return_value = mock_proc
+
+    orch = Orchestrator(config, state_dir=state_dir)
+    orch._process_ready_issues()
+
+    cmd = MockPopen.call_args.args[0]
+    prompt = cmd[-1]
+    # Attempt-2 selected, not attempt-2-wip and not attempt-1
+    assert "ai/issue-42-attempt-2" in prompt
+    assert "git diff origin/ai/dev-v0.1...origin/ai/issue-42-attempt-2" in prompt

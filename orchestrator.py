@@ -371,6 +371,44 @@ class Orchestrator:
 
             self._dispatch_review(issue)
 
+    def _latest_snapshot_for_issue(self, issue_number: int) -> tuple[str | None, str | None]:
+        """Use `git ls-remote` to find the highest attempt-K snapshot for the issue.
+
+        Returns (snapshot_ref, wip_ref). Either may be None. The wip_ref is
+        returned only when its K matches the chosen snapshot's K.
+        """
+        import re
+
+        result = subprocess.run(
+            ["git", "ls-remote", "origin", f"ai/issue-{issue_number}-attempt-*"],
+            capture_output=True, text=True,
+        )
+        if result.returncode != 0:
+            return None, None
+
+        base_re = re.compile(rf"refs/heads/(ai/issue-{issue_number}-attempt-(\d+))$")
+        wip_re = re.compile(rf"refs/heads/(ai/issue-{issue_number}-attempt-(\d+)-wip)$")
+
+        bases: dict[int, str] = {}
+        wips: dict[int, str] = {}
+        for line in result.stdout.splitlines():
+            parts = line.split("\t")
+            if len(parts) != 2:
+                continue
+            ref = parts[1]
+            m = base_re.search(ref)
+            if m:
+                bases[int(m.group(2))] = m.group(1)
+                continue
+            m = wip_re.search(ref)
+            if m:
+                wips[int(m.group(2))] = m.group(1)
+
+        if not bases:
+            return None, None
+        latest_k = max(bases.keys())
+        return bases[latest_k], wips.get(latest_k)
+
     def _snapshot_branch(self, repo: str, issue_number: int, attempt: int) -> dict:
         """Best-effort snapshot of the current ai/issue-N branch + dirty state.
 
@@ -460,24 +498,78 @@ class Orchestrator:
 
         return result
 
-    def _dispatch_coding(self, issue: dict, attempt: int, timeout_override: int | None = None, budget_override: float | None = None, integration_branch: str | None = None):
+    def _dispatch_coding(
+        self,
+        issue: dict,
+        attempt: int,
+        timeout_override: int | None = None,
+        budget_override: float | None = None,
+        integration_branch: str | None = None,
+    ):
+        import re
+        from prior_attempt import render_prior_attempt_context
+
         issue_key = f"{issue['repo']}#{issue['number']}"
         logger.info(f"Dispatching coding agent for {issue_key} (attempt {attempt})")
 
         timeout = timeout_override if timeout_override is not None else self.config["timeouts"]["coding_minutes"]
         if integration_branch is None:
             integration_branch = self._get_integration_branch(issue["title"])
+
+        # Build prior-attempt context for retries
+        prior_attempt_context = ""
+        if attempt > 1:
+            history = self.gh.get_attempt_failure_history(issue["repo"], issue["number"])
+            stop_comment = self.gh.get_latest_agent_stop_comment(
+                issue["repo"], issue["number"], attempt - 1
+            )
+            snapshot_ref, wip_ref = self._latest_snapshot_for_issue(issue["number"])
+            diff_stat = ""
+            if snapshot_ref:
+                diff_proc = subprocess.run(
+                    ["git", "diff", "--stat",
+                     f"origin/{integration_branch}...origin/{snapshot_ref}"],
+                    capture_output=True, text=True,
+                )
+                if diff_proc.returncode == 0:
+                    diff_stat = diff_proc.stdout
+
+            # If GH history is empty but a snapshot exists, synthesize a minimal
+            # history entry from the snapshot's attempt number so the context
+            # renderer still emits the snapshot block.
+            if not history and snapshot_ref:
+                m = re.match(rf"ai/issue-{issue['number']}-attempt-(\d+)$", snapshot_ref)
+                if m:
+                    history = [{
+                        "attempt": int(m.group(1)),
+                        "kind": "unknown",
+                        "reason": "no failure record (legacy or backfilled)",
+                    }]
+
+            prior_attempt_context = render_prior_attempt_context(
+                history=history,
+                latest_diff_stat=diff_stat,
+                snapshot_ref=snapshot_ref,
+                wip_ref=wip_ref,
+                stop_comment=stop_comment,
+                attempt=attempt,
+                integration_branch=integration_branch,
+            )
+
         cmd = self.coding_agent.build_command(
             issue_title=issue["title"],
             issue_body=issue["body"] or "",
             issue_number=issue["number"],
             repo=issue["repo"],
             integration_branch=integration_branch,
-            max_budget_usd=budget_override if budget_override is not None else self.config.get("versioning", {}).get("coding_max_budget_usd", 5.0),
+            max_budget_usd=budget_override if budget_override is not None
+                else self.config.get("versioning", {}).get("coding_max_budget_usd", 5.0),
+            attempt=attempt,
+            prior_attempt_context=prior_attempt_context,
         )
         log_path = self.state.log_path(issue["repo"], issue["number"])
         log_file = open(log_path, "w")
-        cwd = None  # Orchestrator runs from within the target repo
+        cwd = None
         proc = subprocess.Popen(cmd, stdout=log_file, stderr=subprocess.STDOUT, cwd=cwd)
 
         self.gh.update_status(issue["project_item_id"], self.statuses["in_progress"])
