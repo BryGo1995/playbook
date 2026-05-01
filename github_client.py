@@ -283,15 +283,34 @@ class GitHubClient:
         )
 
     def get_attempt_count(self, repo_name: str, issue_number: int) -> int:
-        """Count orchestrator coding attempt comments on an issue."""
+        """Count distinct coding-agent attempts on an issue.
+
+        Counts by attempt number to avoid double-counting an attempt that left both
+        a structured failure JSON block AND a legacy completion comment. Falls back
+        to legacy substring matching for comments predating the structured format.
+        """
+        from prior_attempt import parse_failure_comment
+        import re
+
         owner, repo = repo_name.split("/")
         comments = self._rest_get(f"/repos/{owner}/{repo}/issues/{issue_number}/comments")
-        return sum(
-            1
-            for c in comments
-            if c["body"].startswith(ORCHESTRATOR_TAG) and "Attempt" in c["body"] and "completed" in c["body"]
-            and "coding agent" in c["body"]
-        )
+        attempts: set[int] = set()
+        for c in comments:
+            body = c.get("body", "")
+            if not body.startswith(ORCHESTRATOR_TAG):
+                continue
+            # Prefer structured JSON when present
+            parsed = parse_failure_comment(body)
+            if parsed is not None and "attempt" in parsed:
+                attempts.add(int(parsed["attempt"]))
+                continue
+            # Legacy fallback: "Attempt N completed (coding agent)"
+            if "Attempt" in body and "completed" in body and "coding agent" in body:
+                # Extract the number after "Attempt "
+                m = re.search(r"Attempt\s+(\d+)", body)
+                if m:
+                    attempts.add(int(m.group(1)))
+        return len(attempts)
 
     def get_attempt_failure_history(self, repo_name: str, issue_number: int) -> list[dict]:
         """Walk issue comments, return parsed failure-diagnostic dicts sorted by attempt."""

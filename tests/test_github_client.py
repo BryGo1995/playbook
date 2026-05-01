@@ -78,6 +78,54 @@ def test_get_attempt_count(client):
     assert count == 2
 
 
+def test_get_attempt_count_counts_new_structured_failures(client):
+    """Structured timeout/no-pr failures with JSON blocks should be counted."""
+    mock_resp = MagicMock()
+    mock_resp.json.return_value = [
+        {"body": (
+            "[agent-orchestrator] Attempt 1 failed: timeout.\n\n```json\n"
+            '{"attempt": 1, "kind": "timeout", "reason": "x", "snapshot_ref": null, '
+            '"wip_ref": null, "log_path": "", "ts": ""}\n```'
+        )},
+        {"body": "[agent-orchestrator] Attempt 2 completed (coding agent)."},
+    ]
+    mock_resp.raise_for_status = MagicMock()
+    client._mock_requests.get.return_value = mock_resp
+
+    assert client.get_attempt_count("owner/repo", 42) == 2
+
+
+def test_get_attempt_count_counts_legacy_format_only(client):
+    """Pure legacy comments still count correctly — backward compat."""
+    mock_resp = MagicMock()
+    mock_resp.json.return_value = [
+        {"body": "[agent-orchestrator] Attempt 1 completed (coding agent) but no PR found."},
+        {"body": "[agent-orchestrator] Attempt 2 completed (coding agent)."},
+    ]
+    mock_resp.raise_for_status = MagicMock()
+    client._mock_requests.get.return_value = mock_resp
+
+    assert client.get_attempt_count("owner/repo", 42) == 2
+
+
+def test_get_attempt_count_dedupes_same_attempt_across_formats(client):
+    """A single attempt that produced both a structured failure and (somehow) a legacy
+    comment should only count once — by attempt number."""
+    mock_resp = MagicMock()
+    mock_resp.json.return_value = [
+        {"body": (
+            "[agent-orchestrator] Attempt 1 failed: timeout.\n\n```json\n"
+            '{"attempt": 1, "kind": "timeout", "reason": "x", "snapshot_ref": null, '
+            '"wip_ref": null, "log_path": "", "ts": ""}\n```'
+        )},
+        {"body": "[agent-orchestrator] Attempt 1 completed (coding agent) but no PR found."},
+    ]
+    mock_resp.raise_for_status = MagicMock()
+    client._mock_requests.get.return_value = mock_resp
+
+    assert client.get_attempt_count("owner/repo", 42) == 1
+
+
 def test_merge_pr_success(client):
     mock_resp = MagicMock()
     mock_resp.status_code = 200
