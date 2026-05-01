@@ -304,3 +304,21 @@ def test_get_latest_agent_stop_comment_picks_most_recent_when_duplicates(client)
     client._mock_requests.get.return_value = mock_resp
 
     assert client.get_latest_agent_stop_comment("owner/repo", 42, 1) == "later"
+
+
+def test_get_attempt_count_tolerates_non_numeric_attempt_in_json(client):
+    """A malformed JSON block with a non-numeric attempt must not crash the counter."""
+    mock_resp = MagicMock()
+    mock_resp.json.return_value = [
+        {"body": (
+            "[agent-orchestrator] Attempt malformed.\n\n```json\n"
+            '{"attempt": "not-a-number", "kind": "timeout", "reason": "x", '
+            '"snapshot_ref": null, "wip_ref": null, "log_path": "", "ts": ""}\n```'
+        )},
+        {"body": "[agent-orchestrator] Attempt 2 completed (coding agent)."},
+    ]
+    mock_resp.raise_for_status = MagicMock()
+    client._mock_requests.get.return_value = mock_resp
+
+    # Bad JSON drops through; legacy match catches "Attempt 2 completed"
+    assert client.get_attempt_count("owner/repo", 42) == 1

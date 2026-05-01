@@ -302,8 +302,11 @@ class GitHubClient:
             # Prefer structured JSON when present
             parsed = parse_failure_comment(body)
             if parsed is not None and "attempt" in parsed:
-                attempts.add(int(parsed["attempt"]))
-                continue
+                try:
+                    attempts.add(int(parsed["attempt"]))
+                    continue
+                except (ValueError, TypeError):
+                    pass  # malformed attempt value — fall through to legacy match
             # Legacy fallback: "Attempt N completed (coding agent)"
             if "Attempt" in body and "completed" in body and "coding agent" in body:
                 # Extract the number after "Attempt "
