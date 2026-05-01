@@ -339,3 +339,116 @@ def test_version_completion_sends_slack(MockGH, MockPopen, config, state_dir):
     orch.run()
 
     mock_slack.notify_version_complete.assert_called_once_with("v0.1", 2)
+
+
+def _make_completed_process(returncode=0, stdout="", stderr=""):
+    """Helper for mocking subprocess.run results."""
+    cp = MagicMock()
+    cp.returncode = returncode
+    cp.stdout = stdout
+    cp.stderr = stderr
+    return cp
+
+
+@patch("orchestrator.subprocess.run")
+@patch("orchestrator.GitHubClient")
+def test_snapshot_branch_happy_path(MockGH, MockRun, config, state_dir):
+    """All git steps succeed → status 'ok', both refs returned."""
+    MockGH.return_value = MagicMock()
+    # Sequence: rev-parse (branch exists), stash push (created), rev-parse stash sha,
+    # push branch, push stash, stash drop
+    MockRun.side_effect = [
+        _make_completed_process(0),                         # rev-parse --verify ai/issue-42
+        _make_completed_process(0, stdout="stashed."),      # git stash push
+        _make_completed_process(0, stdout="abc123\n"),      # git rev-parse stash@{0}
+        _make_completed_process(0),                         # push branch ref
+        _make_completed_process(0),                         # push stash ref
+        _make_completed_process(0),                         # stash drop
+    ]
+    orch = Orchestrator(config, state_dir=state_dir)
+
+    result = orch._snapshot_branch("owner/repo", 42, attempt=1)
+
+    assert result["status"] == "ok"
+    assert result["snapshot_ref"] == "ai/issue-42-attempt-1"
+    assert result["wip_ref"] == "ai/issue-42-attempt-1-wip"
+
+
+@patch("orchestrator.subprocess.run")
+@patch("orchestrator.GitHubClient")
+def test_snapshot_branch_no_branch_exists(MockGH, MockRun, config, state_dir):
+    """rev-parse fails → branch never existed → status 'unavailable', no pushes attempted."""
+    MockGH.return_value = MagicMock()
+    MockRun.side_effect = [
+        _make_completed_process(returncode=128),  # rev-parse --verify fails
+    ]
+    orch = Orchestrator(config, state_dir=state_dir)
+
+    result = orch._snapshot_branch("owner/repo", 42, attempt=1)
+
+    assert result["status"] == "unavailable"
+    assert result["snapshot_ref"] is None
+    assert result["wip_ref"] is None
+    # Only one subprocess call (the rev-parse)
+    assert MockRun.call_count == 1
+
+
+@patch("orchestrator.subprocess.run")
+@patch("orchestrator.GitHubClient")
+def test_snapshot_branch_partial_when_stash_push_fails(MockGH, MockRun, config, state_dir):
+    """Stash created but stash-ref push fails → status 'partial', base ref populated, no exception."""
+    MockGH.return_value = MagicMock()
+    MockRun.side_effect = [
+        _make_completed_process(0),                         # rev-parse branch
+        _make_completed_process(0, stdout="stashed."),      # stash push (created)
+        _make_completed_process(0, stdout="abc123\n"),      # rev-parse stash@{0}
+        _make_completed_process(0),                         # push branch (success)
+        _make_completed_process(returncode=1, stderr="permission denied"),  # push stash (fail)
+        _make_completed_process(0),                         # stash drop (still runs)
+    ]
+    orch = Orchestrator(config, state_dir=state_dir)
+
+    result = orch._snapshot_branch("owner/repo", 42, attempt=2)
+
+    assert result["status"] == "partial"
+    assert result["snapshot_ref"] == "ai/issue-42-attempt-2"
+    assert result["wip_ref"] is None
+
+
+@patch("orchestrator.subprocess.run")
+@patch("orchestrator.GitHubClient")
+def test_snapshot_branch_unavailable_when_branch_push_fails(MockGH, MockRun, config, state_dir):
+    """Branch push fails entirely → status 'unavailable', stash still dropped."""
+    MockGH.return_value = MagicMock()
+    MockRun.side_effect = [
+        _make_completed_process(0),                                     # rev-parse branch
+        _make_completed_process(0, stdout="No local changes to save."), # stash push (no stash)
+        _make_completed_process(returncode=1, stderr="auth failed"),    # push branch (fail)
+        # No stash to drop
+    ]
+    orch = Orchestrator(config, state_dir=state_dir)
+
+    result = orch._snapshot_branch("owner/repo", 42, attempt=1)
+
+    assert result["status"] == "unavailable"
+    assert result["snapshot_ref"] is None
+    assert result["wip_ref"] is None
+
+
+@patch("orchestrator.subprocess.run")
+@patch("orchestrator.GitHubClient")
+def test_snapshot_branch_no_dirty_state_succeeds_with_no_wip(MockGH, MockRun, config, state_dir):
+    """Clean working tree → no stash, only branch ref pushed → status 'ok' with wip_ref=None."""
+    MockGH.return_value = MagicMock()
+    MockRun.side_effect = [
+        _make_completed_process(0),                                     # rev-parse branch
+        _make_completed_process(0, stdout="No local changes to save."), # stash push (no stash)
+        _make_completed_process(0),                                     # push branch
+    ]
+    orch = Orchestrator(config, state_dir=state_dir)
+
+    result = orch._snapshot_branch("owner/repo", 42, attempt=1)
+
+    assert result["status"] == "ok"
+    assert result["snapshot_ref"] == "ai/issue-42-attempt-1"
+    assert result["wip_ref"] is None

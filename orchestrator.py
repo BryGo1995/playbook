@@ -312,6 +312,95 @@ class Orchestrator:
 
             self._dispatch_review(issue)
 
+    def _snapshot_branch(self, repo: str, issue_number: int, attempt: int) -> dict:
+        """Best-effort snapshot of the current ai/issue-N branch + dirty state.
+
+        Returns a dict with keys: snapshot_ref, wip_ref, status (ok|partial|unavailable),
+        error. Never raises. Steps are independently try/except'd; partial successes
+        are reflected in the returned status.
+        """
+        branch = f"ai/issue-{issue_number}"
+        snapshot_ref_name = f"ai/issue-{issue_number}-attempt-{attempt}"
+        wip_ref_name = f"ai/issue-{issue_number}-attempt-{attempt}-wip"
+        result = {
+            "snapshot_ref": None,
+            "wip_ref": None,
+            "status": "unavailable",
+            "error": None,
+        }
+
+        # 0. Does the branch even exist locally?
+        check = subprocess.run(
+            ["git", "rev-parse", "--verify", branch],
+            capture_output=True, text=True,
+        )
+        if check.returncode != 0:
+            result["error"] = "branch does not exist locally"
+            return result
+
+        # 1. Stash dirty state (if any). --include-untracked respects .gitignore.
+        stash_msg = f"[playbook] attempt-{attempt} WIP"
+        stash = subprocess.run(
+            ["git", "stash", "push", "--include-untracked", "--message", stash_msg],
+            capture_output=True, text=True,
+        )
+        stash_created = (
+            stash.returncode == 0
+            and "No local changes to save" not in stash.stdout
+            and "No local changes to save" not in stash.stderr
+        )
+
+        stash_sha: str | None = None
+        if stash_created:
+            sha = subprocess.run(
+                ["git", "rev-parse", "stash@{0}"],
+                capture_output=True, text=True,
+            )
+            if sha.returncode == 0:
+                stash_sha = sha.stdout.strip()
+
+        # 2. Push the branch as the snapshot ref.
+        try:
+            push_branch = subprocess.run(
+                ["git", "push", "--force", "origin",
+                 f"{branch}:refs/heads/{snapshot_ref_name}"],
+                capture_output=True, text=True,
+            )
+            if push_branch.returncode == 0:
+                result["snapshot_ref"] = snapshot_ref_name
+            else:
+                result["error"] = f"branch push failed: {push_branch.stderr.strip()}"
+        except Exception as e:
+            result["error"] = f"branch push exception: {e}"
+
+        # 3. Push the stash sha as the wip ref (if we have one).
+        if stash_sha is not None and result["snapshot_ref"] is not None:
+            try:
+                push_wip = subprocess.run(
+                    ["git", "push", "--force", "origin",
+                     f"{stash_sha}:refs/heads/{wip_ref_name}"],
+                    capture_output=True, text=True,
+                )
+                if push_wip.returncode == 0:
+                    result["wip_ref"] = wip_ref_name
+            except Exception:
+                pass  # best-effort — stash is forensic only
+
+        # 4. Drop the local stash (always — don't leave dirty state behind).
+        if stash_created:
+            subprocess.run(["git", "stash", "drop"], capture_output=True, text=True)
+
+        # 5. Decide overall status.
+        if result["snapshot_ref"] is None:
+            result["status"] = "unavailable"
+        elif stash_sha is not None and result["wip_ref"] is None:
+            # We had a stash but couldn't push it
+            result["status"] = "partial"
+        else:
+            result["status"] = "ok"
+
+        return result
+
     def _dispatch_coding(self, issue: dict, attempt: int, timeout_override: int | None = None, budget_override: float | None = None, integration_branch: str | None = None):
         issue_key = f"{issue['repo']}#{issue['number']}"
         logger.info(f"Dispatching coding agent for {issue_key} (attempt {attempt})")
