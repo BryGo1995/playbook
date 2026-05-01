@@ -767,3 +767,74 @@ def test_dispatch_coding_retry_picks_highest_attempt_excluding_wip(
     # Attempt-2 selected, not attempt-2-wip and not attempt-1
     assert "ai/issue-42-attempt-2" in prompt
     assert "git diff origin/ai/dev-v0.1...origin/ai/issue-42-attempt-2" in prompt
+
+
+@patch("orchestrator.subprocess.run")
+@patch("orchestrator.GitHubClient")
+def test_complete_issues_deletes_snapshot_refs_after_merge(
+    MockGH, MockRun, config, state_dir
+):
+    mock_gh = MockGH.return_value
+    mock_issue = {
+        "number": 42, "title": "[v0.1] Bug", "body": "",
+        "repo": "owner/repo", "project_item_id": "item_1", "status": "ai-complete",
+    }
+    mock_gh.fetch_issues_by_status.side_effect = lambda s: [mock_issue] if s == "ai-complete" else []
+    mock_gh.find_pr_for_branch.return_value = 100
+    mock_gh.merge_pr.return_value = True
+
+    # Subprocess sequence:
+    #   1. git branch -D ai/issue-42 (existing local cleanup)
+    #   2. git ls-remote for ai/issue-42-attempt-* (new)
+    #   3. git push --delete (new)
+    MockRun.side_effect = [
+        _make_completed_process(0),  # branch -D
+        _make_completed_process(0, stdout=(
+            "aaa\trefs/heads/ai/issue-42-attempt-1\n"
+            "bbb\trefs/heads/ai/issue-42-attempt-1-wip\n"
+            "ccc\trefs/heads/ai/issue-42-attempt-2\n"
+        )),
+        _make_completed_process(0),  # push --delete
+    ]
+
+    orch = Orchestrator(config, state_dir=state_dir)
+    orch._process_complete_issues()
+
+    # The push --delete call should reference all three refs
+    delete_calls = [
+        c for c in MockRun.call_args_list
+        if "push" in c.args[0] and "--delete" in c.args[0]
+    ]
+    assert len(delete_calls) == 1
+    deleted_args = delete_calls[0].args[0]
+    assert "ai/issue-42-attempt-1" in deleted_args
+    assert "ai/issue-42-attempt-1-wip" in deleted_args
+    assert "ai/issue-42-attempt-2" in deleted_args
+
+
+@patch("orchestrator.subprocess.run")
+@patch("orchestrator.GitHubClient")
+def test_complete_issues_tolerates_snapshot_cleanup_failure(
+    MockGH, MockRun, config, state_dir
+):
+    """Cleanup failure must not break the merge flow."""
+    mock_gh = MockGH.return_value
+    mock_issue = {
+        "number": 42, "title": "[v0.1] Bug", "body": "",
+        "repo": "owner/repo", "project_item_id": "item_1", "status": "ai-complete",
+    }
+    mock_gh.fetch_issues_by_status.side_effect = lambda s: [mock_issue] if s == "ai-complete" else []
+    mock_gh.find_pr_for_branch.return_value = 100
+    mock_gh.merge_pr.return_value = True
+
+    MockRun.side_effect = [
+        _make_completed_process(0),  # branch -D
+        _make_completed_process(returncode=1, stderr="boom"),  # ls-remote fails
+    ]
+
+    orch = Orchestrator(config, state_dir=state_dir)
+    orch._process_complete_issues()  # Must not raise
+
+    # Issue still advanced to Done
+    update_status_calls = mock_gh.update_status.call_args_list
+    assert any(call.args[1] == config["statuses"]["done"] for call in update_status_calls)

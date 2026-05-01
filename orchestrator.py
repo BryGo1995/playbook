@@ -237,12 +237,34 @@ class Orchestrator:
                     self.gh.add_comment(issue["repo"], issue["number"],
                         f"[agent-orchestrator] PR #{pr_number} auto-merged into `{integration_branch}`.")
                     self.slack.notify_pr_ready(issue_key, pr_number)
-                    # Clean up local feature branch (CWD is the target repo)
+
+                    # Clean up local feature branch
                     result = subprocess.run(["git", "branch", "-D", pr_branch], capture_output=True)
                     if result.returncode == 0:
                         logger.info(f"Deleted local branch {pr_branch}")
                     else:
                         logger.debug(f"Local branch {pr_branch} not found, skipping cleanup")
+
+                    # Best-effort cleanup of snapshot refs for this issue
+                    try:
+                        ls = subprocess.run(
+                            ["git", "ls-remote", "origin",
+                             f"ai/issue-{issue['number']}-attempt-*"],
+                            capture_output=True, text=True,
+                        )
+                        if ls.returncode == 0 and ls.stdout.strip():
+                            refs_to_delete = []
+                            for line in ls.stdout.splitlines():
+                                parts = line.split("\t")
+                                if len(parts) == 2 and parts[1].startswith("refs/heads/"):
+                                    refs_to_delete.append(parts[1][len("refs/heads/"):])
+                            if refs_to_delete:
+                                subprocess.run(
+                                    ["git", "push", "origin", "--delete", *refs_to_delete],
+                                    capture_output=True, text=True,
+                                )
+                    except Exception as e:
+                        logger.debug(f"Snapshot ref cleanup failed (non-fatal): {e}")
                 else:
                     logger.warning(f"Merge failed for PR #{pr_number} ({issue_key})")
                     self.gh.update_status(issue["project_item_id"], self.statuses["blocked"])
