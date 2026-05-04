@@ -1,16 +1,26 @@
 #!/bin/bash
 # Playbook — Run orchestrator for all configured projects
 # Each project must have a playbook.yaml in its root.
-# Add/remove project directories below as needed.
+#
+# Configure your projects by editing the PROJECTS array below, e.g.:
+#
+#   PROJECTS=(
+#       "$HOME/code/my-project"
+#       "$HOME/code/another-project"
+#   )
 
 PLAYBOOK_DIR="$(cd "$(dirname "$0")" && pwd)"
 export PYTHONPATH="$PLAYBOOK_DIR"
 export PATH="$HOME/.local/bin:$PATH"
 
 PROJECTS=(
-    "/home/bryang/Dev_Space/bee_gee_games/godot/paint-ballas-auto"
-    "/home/bryang/Dev_Space/ml_projects/snowie"
+    # Add absolute paths to your project directories here.
 )
+
+if [ ${#PROJECTS[@]} -eq 0 ]; then
+    echo "[playbook] No projects configured. Edit PROJECTS in $0 to add project directories." >&2
+    exit 0
+fi
 
 for dir in "${PROJECTS[@]}"; do
     if [ ! -f "$dir/playbook.yaml" ]; then
