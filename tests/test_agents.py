@@ -1,5 +1,10 @@
+import os
+import re
 import pytest
 from unittest.mock import patch, MagicMock
+import agents.coding
+import agents.testing
+import agents.review
 from agents.base import build_claude_command
 from agents.coding import CodingAgent
 from agents.testing import TestingAgent
@@ -219,3 +224,56 @@ def test_review_agent_command_passes_addendum_through():
         project_addendum="ADDENDUM_SENTINEL_REVIEW_CMD",
     )
     assert "ADDENDUM_SENTINEL_REVIEW_CMD" in " ".join(cmd)
+
+
+def _baseline_prompt_path(module, name: str) -> str:
+    return os.path.join(os.path.dirname(module.__file__), "prompts", f"{name}.md")
+
+
+def test_coding_prompt_loads_from_markdown_file():
+    md_path = _baseline_prompt_path(agents.coding, "coding")
+    assert os.path.isfile(md_path), f"Expected baseline prompt at {md_path}"
+    with open(md_path) as f:
+        assert f.read() == agents.coding.CODING_PROMPT
+
+
+def test_testing_prompt_loads_from_markdown_file():
+    md_path = _baseline_prompt_path(agents.testing, "testing")
+    assert os.path.isfile(md_path), f"Expected baseline prompt at {md_path}"
+    with open(md_path) as f:
+        assert f.read() == agents.testing.TESTING_PROMPT
+
+
+def test_review_prompt_loads_from_markdown_file():
+    md_path = _baseline_prompt_path(agents.review, "review")
+    assert os.path.isfile(md_path), f"Expected baseline prompt at {md_path}"
+    with open(md_path) as f:
+        assert f.read() == agents.review.REVIEW_PROMPT
+
+
+def test_coding_prompt_placeholders_match_expected():
+    placeholders = set(re.findall(r"\{(\w+)\}", agents.coding.CODING_PROMPT))
+    expected = {
+        "repo", "issue_number", "issue_title", "issue_body",
+        "integration_branch", "attempt", "prior_attempt_context",
+        "project_addendum",
+    }
+    assert placeholders == expected
+
+
+def test_testing_prompt_placeholders_match_expected():
+    placeholders = set(re.findall(r"\{(\w+)\}", agents.testing.TESTING_PROMPT))
+    expected = {
+        "repo", "issue_number", "issue_title", "issue_body",
+        "pr_branch", "project_addendum",
+    }
+    assert placeholders == expected
+
+
+def test_review_prompt_placeholders_match_expected():
+    placeholders = set(re.findall(r"\{(\w+)\}", agents.review.REVIEW_PROMPT))
+    expected = {
+        "repo", "issue_number", "issue_title", "issue_body",
+        "pr_number", "project_addendum",
+    }
+    assert placeholders == expected
