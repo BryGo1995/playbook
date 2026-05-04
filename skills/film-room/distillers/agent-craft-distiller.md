@@ -183,9 +183,8 @@ Source: <project_film_room_issue_url>
   `.playbook/agents/review.md`, `.playbook/agents/testing.md`, or
   `.playbook/agent-craft-observations.md`.
 - Never propose any change to the playbook repo (no edits to
-  `agents/*.py`, `docs/agent-craft-observations.md`, or anything else
-  under the playbook repo). The playbook ships as a baseline that no
-  project's film-room is permitted to modify.
+  `agents/*.py` or anything else under the playbook repo). The playbook
+  ships as a baseline that no project's film-room is permitted to modify.
 - Never delete or reorder existing entries in an addendum file or the
   observations log — only append, or add a new section heading.
 - Never propose an addendum and an observation in the same run. Choose
