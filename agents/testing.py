@@ -18,7 +18,7 @@ TESTING_PROMPT = """You are a testing agent verifying work on GitHub issue {repo
 5. If tests are missing for acceptance criteria, write them in the appropriate test files.
 6. Run the full test suite again. All tests must pass.
 7. If tests fail and you cannot fix them by adding test code only, stop and report the failures.
-
+{project_addendum}
 You may only write code in test files. Do not modify implementation code.
 """
 
@@ -33,13 +33,16 @@ class TestingAgent:
         issue_number: int,
         repo: str,
         pr_branch: str,
+        project_addendum: str = "",
     ) -> str:
+        addn = f"\n{project_addendum}" if project_addendum else ""
         return TESTING_PROMPT.format(
             repo=repo,
             issue_number=issue_number,
             issue_title=issue_title,
             issue_body=issue_body,
             pr_branch=pr_branch,
+            project_addendum=addn,
         )
 
     def build_command(
@@ -50,8 +53,12 @@ class TestingAgent:
         repo: str,
         pr_branch: str,
         max_budget_usd: float = 0.50,
+        project_addendum: str = "",
     ) -> list[str]:
-        prompt = self.build_prompt(issue_title, issue_body, issue_number, repo, pr_branch)
+        prompt = self.build_prompt(
+            issue_title, issue_body, issue_number, repo, pr_branch,
+            project_addendum=project_addendum,
+        )
         return build_claude_command(
             prompt=prompt,
             allowed_tools=ALLOWED_TOOLS,

@@ -15,7 +15,7 @@ REVIEW_PROMPT = """You are a code review agent for GitHub issue {repo}#{issue_nu
 4. Leave specific review comments on the PR explaining any issues found.
 5. If the PR meets all acceptance criteria and has no significant issues, approve it.
 6. If there are issues, request changes with clear, actionable feedback.
-
+{project_addendum}
 You are read-only. Do NOT modify any files. Only leave review comments.
 """
 
@@ -30,13 +30,16 @@ class ReviewAgent:
         issue_number: int,
         repo: str,
         pr_number: int,
+        project_addendum: str = "",
     ) -> str:
+        addn = f"\n{project_addendum}" if project_addendum else ""
         return REVIEW_PROMPT.format(
             repo=repo,
             issue_number=issue_number,
             issue_title=issue_title,
             issue_body=issue_body,
             pr_number=pr_number,
+            project_addendum=addn,
         )
 
     def build_command(
@@ -47,8 +50,12 @@ class ReviewAgent:
         repo: str,
         pr_number: int,
         max_budget_usd: float = 0.50,
+        project_addendum: str = "",
     ) -> list[str]:
-        prompt = self.build_prompt(issue_title, issue_body, issue_number, repo, pr_number)
+        prompt = self.build_prompt(
+            issue_title, issue_body, issue_number, repo, pr_number,
+            project_addendum=project_addendum,
+        )
         return build_claude_command(
             prompt=prompt,
             allowed_tools=ALLOWED_TOOLS,

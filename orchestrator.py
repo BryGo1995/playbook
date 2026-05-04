@@ -17,6 +17,24 @@ from logger import setup_logger
 logger = setup_logger()
 
 
+def _load_project_addendum(agent_type: str) -> str:
+    """Read a per-agent project addendum from `<cwd>/.playbook/agents/<agent_type>.md`.
+
+    Returns the file contents when present, or an empty string when the file is
+    missing. Read errors are logged and swallowed so a malformed addendum cannot
+    block dispatch.
+    """
+    path = os.path.join(".playbook", "agents", f"{agent_type}.md")
+    try:
+        with open(path, "r") as f:
+            return f.read()
+    except FileNotFoundError:
+        return ""
+    except OSError as e:
+        logger.warning(f"Failed to read project addendum {path}: {e}")
+        return ""
+
+
 class Orchestrator:
     def __init__(self, config: dict, state_dir: str | None = None):
         self.config = config
@@ -587,6 +605,7 @@ class Orchestrator:
                 else self.config.get("versioning", {}).get("coding_max_budget_usd", 5.0),
             attempt=attempt,
             prior_attempt_context=prior_attempt_context,
+            project_addendum=_load_project_addendum("coding"),
         )
         log_path = self.state.log_path(issue["repo"], issue["number"])
         log_file = open(log_path, "w")
@@ -615,6 +634,7 @@ class Orchestrator:
             issue_number=issue["number"],
             repo=issue["repo"],
             pr_branch=pr_branch,
+            project_addendum=_load_project_addendum("testing"),
         )
         log_path = self.state.log_path(issue["repo"], issue["number"])
         log_file = open(log_path, "w")
@@ -642,6 +662,7 @@ class Orchestrator:
             issue_number=issue["number"],
             repo=issue["repo"],
             pr_number=pr_number,
+            project_addendum=_load_project_addendum("review"),
         )
         log_path = self.state.log_path(issue["repo"], issue["number"])
         log_file = open(log_path, "w")

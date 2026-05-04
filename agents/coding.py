@@ -17,7 +17,7 @@ CODING_PROMPT = """You are a coding agent working on GitHub issue {repo}#{issue_
 6. Open a draft pull request targeting `{integration_branch}`, linking to issue #{issue_number}.
 7. Keep changes focused — modify no more than 10 files.
 8. If the requirements are ambiguous or you cannot proceed, stop and explain why in a comment. Prefix that comment with `[ai-coding-agent: stop attempt={attempt}]` so future attempts can find your reasoning.
-
+{project_addendum}
 IMPORTANT: Branch from `{integration_branch}`, NOT from `main`. Target the PR to `{integration_branch}`.
 Do NOT merge anything. Draft PR only.
 """
@@ -35,9 +35,11 @@ class CodingAgent:
         integration_branch: str = "ai/dev",
         attempt: int = 1,
         prior_attempt_context: str = "",
+        project_addendum: str = "",
     ) -> str:
         # Newline-pad the context block so it sits cleanly between body and instructions
         ctx = f"\n{prior_attempt_context}" if prior_attempt_context else ""
+        addn = f"\n{project_addendum}" if project_addendum else ""
         return CODING_PROMPT.format(
             repo=repo,
             issue_number=issue_number,
@@ -46,6 +48,7 @@ class CodingAgent:
             integration_branch=integration_branch,
             attempt=attempt,
             prior_attempt_context=ctx,
+            project_addendum=addn,
         )
 
     def build_command(
@@ -58,10 +61,12 @@ class CodingAgent:
         max_budget_usd: float = 3.0,
         attempt: int = 1,
         prior_attempt_context: str = "",
+        project_addendum: str = "",
     ) -> list[str]:
         prompt = self.build_prompt(
             issue_title, issue_body, issue_number, repo, integration_branch,
             attempt=attempt, prior_attempt_context=prior_attempt_context,
+            project_addendum=project_addendum,
         )
         return build_claude_command(
             prompt=prompt,

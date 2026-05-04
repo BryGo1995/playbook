@@ -161,3 +161,61 @@ def test_coding_prompt_default_attempt_is_1_and_no_context():
     )
     assert "Prior Attempt Context" not in prompt
     assert "[ai-coding-agent: stop attempt=1]" in prompt
+
+
+def test_coding_agent_includes_project_addendum_when_provided():
+    agent = CodingAgent()
+    prompt = agent.build_prompt(
+        issue_title="t", issue_body="b", issue_number=1, repo="o/r",
+        project_addendum="ADDENDUM_SENTINEL_CODING",
+    )
+    assert "ADDENDUM_SENTINEL_CODING" in prompt
+
+
+def test_coding_agent_command_passes_addendum_through():
+    agent = CodingAgent()
+    cmd = agent.build_command(
+        issue_title="t", issue_body="b", issue_number=1, repo="o/r",
+        project_addendum="ADDENDUM_SENTINEL_CODING_CMD",
+    )
+    assert "ADDENDUM_SENTINEL_CODING_CMD" in " ".join(cmd)
+
+
+def test_testing_agent_includes_project_addendum_when_provided():
+    agent = TestingAgent()
+    prompt = agent.build_prompt(
+        issue_title="t", issue_body="b", issue_number=1, repo="o/r",
+        pr_branch="b",
+        project_addendum="ADDENDUM_SENTINEL_TESTING",
+    )
+    assert "ADDENDUM_SENTINEL_TESTING" in prompt
+
+
+def test_testing_agent_command_passes_addendum_through():
+    agent = TestingAgent()
+    cmd = agent.build_command(
+        issue_title="t", issue_body="b", issue_number=1, repo="o/r",
+        pr_branch="b",
+        project_addendum="ADDENDUM_SENTINEL_TESTING_CMD",
+    )
+    assert "ADDENDUM_SENTINEL_TESTING_CMD" in " ".join(cmd)
+
+
+def test_review_agent_includes_project_addendum_when_provided():
+    agent = ReviewAgent()
+    prompt = agent.build_prompt(
+        issue_title="t", issue_body="b", issue_number=1, repo="o/r",
+        pr_number=1,
+        project_addendum="ADDENDUM_SENTINEL_REVIEW",
+    )
+    assert "ADDENDUM_SENTINEL_REVIEW" in prompt
+
+
+def test_review_agent_command_passes_addendum_through():
+    agent = ReviewAgent()
+    cmd = agent.build_command(
+        issue_title="t", issue_body="b", issue_number=1, repo="o/r",
+        pr_number=1,
+        project_addendum="ADDENDUM_SENTINEL_REVIEW_CMD",
+    )
+    assert "ADDENDUM_SENTINEL_REVIEW_CMD" in " ".join(cmd)

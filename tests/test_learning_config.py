@@ -13,7 +13,8 @@ def test_defaults_provide_learning_block(tmp_path):
     assert cfg["learning"]["enabled"] is True
     assert cfg["learning"]["project_distiller"] is True
     assert cfg["learning"]["agent_craft_distiller"] is True
-    assert cfg["learning"]["playbook_repo"] == "BryGo1995/playbook"
+    # Distillers write only to the project repo; no playbook_repo key.
+    assert "playbook_repo" not in cfg["learning"]
 
 
 def test_project_can_disable_learning(tmp_path):

@@ -245,27 +245,34 @@ forensic evidence.
 ### Learning Loop
 
 Each film-room session ends by running two distillers that turn the
-human-validated fixes into proposed improvements:
+human-validated fixes into proposed improvements. Both write **only to
+the project repo** — neither modifies the playbook installation, so
+project-specific signal can never leak into the upstream playbook
+prompts.
 
 - **Project distiller** — proposes additions to the project repo's
   `CLAUDE.md` so future agents working on the same repo pick up the
-  conventions automatically. Output: a PR against the project repo.
+  conventions automatically.
 - **Agent-craft distiller** — looks for failure modes of the agents
-  themselves (not project conventions) and either proposes a prompt edit
-  to `agents/{coding,review,testing}.py` (when ≥2 fixes show the same
-  pattern, or one severe occurrence) or appends an entry to
-  `docs/agent-craft-observations.md` for future pattern-matching. Output:
-  a PR against the playbook repo.
+  themselves (not project conventions) and either proposes a project-
+  local addendum to `.playbook/agents/{coding,review,testing}.md` (when
+  ≥2 fixes show the same pattern, or one severe occurrence) or appends
+  an entry to `.playbook/agent-craft-observations.md` for future
+  pattern-matching across versions of this project. Per-agent addenda
+  are loaded by the orchestrator at dispatch time and appended to the
+  matching agent's prompt — they are append-only and never round-trip
+  to the playbook repo.
 
-Both distillers always produce PRs — never auto-merges. The human is the
-gate. Disable per-project via `playbook.yaml`:
+The two distillers share a single learning branch
+(`learning/film-room-vX.Y`) and combine into one PR against the project
+repo. The human is the gate — distillers never auto-merge. Disable
+per-project via `playbook.yaml`:
 
 ```yaml
 learning:
   enabled: true              # set false to disable both distillers
   project_distiller: true
   agent_craft_distiller: true
-  playbook_repo: "BryGo1995/playbook"
 ```
 
 ### Quality Metrics

@@ -338,8 +338,10 @@ Wait for the user's choice.
 ### Step 4.5 — Run distillers
 
 Two distillers run after the merge but before cleanup. Each is a `claude
--p` invocation that consumes the film-room data and either opens a PR or
-exits cleanly with no PR. Both are skipped when:
+-p` invocation that consumes the film-room data and either contributes
+to a project-local learning PR or exits cleanly with nothing to record.
+Both write only to the project repo — neither touches the playbook
+installation. Both are skipped when:
 
 - `learning.enabled` is `false` in `playbook.yaml` (use the merged config
   from `defaults.yaml` + `playbook.yaml`), **OR**
@@ -350,6 +352,19 @@ Skip individual distillers when their toggle is false:
 - `learning.project_distiller: false` → skip the project distiller.
 - `learning.agent_craft_distiller: false` → skip the agent-craft
   distiller.
+
+The two distillers share a single learning branch
+(`learning/film-room-vX.Y`) in the project repo and produce one combined
+PR at the end. Order of operations:
+
+1. Gather the shared input bundle.
+2. Prepare the local learning branch (no push yet).
+3. Run the project distiller — if it produces output, write the file and
+   commit on the learning branch.
+4. Run the agent-craft distiller — if it produces output, write the file
+   and commit on the learning branch.
+5. If any commit landed, push the branch and open one combined PR.
+   Otherwise tear down the local branch.
 
 #### Gather the input bundle (shared by both distillers)
 
@@ -382,6 +397,29 @@ working tree.
 
 Combine all of the above into a single text bundle. The exact format does
 not matter; the distillers are told what fields to expect.
+
+#### Prepare the learning branch
+
+Both distillers commit to the same local branch in the project repo. Set
+it up before invoking either:
+
+```bash
+git fetch origin main
+# If a previous run left this branch around, recreate it from origin/main
+# to start clean:
+if git show-ref --verify --quiet refs/heads/learning/film-room-vX.Y; then
+  git branch -D learning/film-room-vX.Y
+fi
+git checkout -b learning/film-room-vX.Y origin/main
+```
+
+Initialize a counter `LEARNING_COMMITS=0` in conversation context — bump
+it for each distiller commit that lands so the final step knows whether
+to push and open a PR.
+
+Initialize empty PR-body fragments `PROJECT_PR_BODY=""` and
+`AGENT_CRAFT_PR_BODY=""` — populated by the distillers' outputs and
+combined into the final PR body.
 
 #### Run the project distiller
 
@@ -434,63 +472,48 @@ Skip this section if `learning.project_distiller` is false.
 
 5. **If `CLAUDE_MD` is the string `null` or `LESSONS` is `0`**, tell the user:
    > "Project distiller ran but proposed no lessons (every fix was a local
-   > incident or already covered in CLAUDE.md). No PR opened."
+   > incident or already covered in CLAUDE.md). No project commit added."
    Skip to the agent-craft distiller.
 
-6. **Otherwise**, open a PR against the project repo:
+6. **Otherwise**, write the file and commit on the learning branch (no
+   push yet — the final sub-step handles push + PR):
    ```bash
-   git checkout -b learning/film-room-vX.Y origin/main
-   # Write the new CLAUDE.md from the distiller output:
    printf '%s' "$CLAUDE_MD" > CLAUDE.md
    git add CLAUDE.md
-   git commit -m "chore: capture lessons from vX.Y film-room"
-   git push -u origin learning/film-room-vX.Y
-   printf '%s' "$PR_BODY" > /tmp/project-distiller.prbody.md
-   gh pr create --repo <repo> \
-     --base main \
-     --head learning/film-room-vX.Y \
-     --title "Lessons from vX.Y film-room" \
-     --body-file /tmp/project-distiller.prbody.md
+   git commit -m "chore: capture project lessons from vX.Y film-room"
    ```
-   Tell the user the PR URL.
-
-   After the PR is created, return to the film-room fix branch:
-   ```bash
-   git checkout film-room/<version_label>
-   ```
+   Increment `LEARNING_COMMITS`. Stash `PR_BODY` into `PROJECT_PR_BODY`
+   for the combined PR body.
 
 #### Run the agent-craft distiller
 
 Skip this section if `learning.agent_craft_distiller` is false.
 
-1. Resolve the playbook repo identifier from the merged config:
-   `learning.playbook_repo` (default `BryGo1995/playbook`).
-
-2. Read the current playbook agent prompts and the observations log from
-   the playbook repo. Use `gh api` so the operator does not need a local
-   clone:
+1. Read the current project-local addenda and observations log from the
+   project repo's working tree (each may be empty or missing — treat
+   missing as empty):
    ```bash
-   gh api repos/<playbook_repo>/contents/agents/coding.py   --jq .content | base64 -d
-   gh api repos/<playbook_repo>/contents/agents/review.py   --jq .content | base64 -d
-   gh api repos/<playbook_repo>/contents/agents/testing.py  --jq .content | base64 -d
-   gh api repos/<playbook_repo>/contents/docs/agent-craft-observations.md --jq .content | base64 -d
+   for f in .playbook/agents/coding.md .playbook/agents/testing.md \
+            .playbook/agents/review.md .playbook/agent-craft-observations.md; do
+     if [ -f "$f" ]; then cat "$f"; else echo ""; fi
+   done
    ```
 
-3. Read the agent-craft distiller prompt (sibling of `SKILL.md`):
+2. Read the agent-craft distiller prompt (sibling of `SKILL.md`):
    ```bash
    cat <playbook_repo_path>/skills/film-room/distillers/agent-craft-distiller.md
    ```
 
-4. Build the distiller invocation. Pass: the prompt + the input bundle +
-   the three agent files + the observations log + the playbook repo id +
-   the project repo id + the version + today's date + the project
-   film-room issue URL.
+3. Build the distiller invocation. Pass: the prompt + the input bundle +
+   the four project-local files (addenda + observations log) + the
+   project repo id + the version + today's date + the project film-room
+   issue URL.
 
    ```bash
    claude -p --output-format json --max-budget-usd 1.0 "$AGENT_CRAFT_PROMPT_WITH_INPUTS" > /tmp/agent-craft.json
    ```
 
-5. Unwrap the `claude -p` envelope and re-parse the distiller's payload:
+4. Unwrap the `claude -p` envelope and re-parse the distiller's payload:
    ```bash
    SUBTYPE=$(jq -r .subtype /tmp/agent-craft.json)
    if [ "$SUBTYPE" != "success" ]; then
@@ -505,78 +528,88 @@ Skip this section if `learning.agent_craft_distiller` is false.
    PR_BODY_AC=$(echo "$PAYLOAD" | jq -r .pr_body)
    ```
 
-6. **If `MODE` is `"skip"`**, tell the user:
+5. **If `MODE` is `"skip"`**, tell the user:
    > "Agent-craft distiller ran and found no agent-craft signals this
-   > session. No PR opened."
-   Done with distillers.
+   > session. No agent-craft commit added."
+   Continue to the combined PR sub-step.
 
-7. **Otherwise**, open a PR against the playbook repo. The branch name
-   encodes the project + version so concurrent sessions do not collide.
-   First, resolve `<project_repo_slug>` — take the project's `<repo>`
-   identifier, lowercase it, and replace `/` with `-`.
+6. **Validate `TARGET`** — it must be one of the four allowed
+   project-local paths (`.playbook/agents/coding.md`,
+   `.playbook/agents/testing.md`, `.playbook/agents/review.md`,
+   `.playbook/agent-craft-observations.md`). If the distiller returned
+   anything else, treat it as an error: tell the user, skip the commit,
+   continue.
 
-   Then run these steps in order:
+7. **Otherwise**, write the patched file to the working tree and commit
+   on the learning branch (creating any missing parent directories):
+   ```bash
+   mkdir -p "$(dirname "$TARGET")"
+   printf '%s' "$PATCHED" > "$TARGET"
+   git add "$TARGET"
+   git commit -m "agent-craft: $MODE from vX.Y film-room"
+   ```
+   Increment `LEARNING_COMMITS`. Stash `PR_BODY_AC` into
+   `AGENT_CRAFT_PR_BODY` for the combined PR body.
 
-   a. Create the branch off `main` in the playbook repo (if it does not
-      already exist). Get the SHA of `main` first, then create the ref:
-      ```bash
-      BRANCH="learning/<project_repo_slug>-vX.Y"
-      MAIN_SHA=$(gh api repos/<playbook_repo>/git/refs/heads/main --jq .object.sha)
-      gh api -X POST repos/<playbook_repo>/git/refs \
-        -f ref="refs/heads/$BRANCH" \
-        -f sha="$MAIN_SHA" \
-        || echo "Branch already exists, continuing"
-      ```
-      The `|| echo ...` only catches the "already exists" case from
-      re-running the distiller after a failure; do not use it to mask
-      other errors — inspect the command's stderr.
+#### Open the combined PR (or skip)
 
-   b. Fetch the SHA of the existing file on that branch (if any). The
-      file may not exist (e.g. this is the first
-      `docs/agent-craft-observations.md` write, though Task 4 seeded it,
-      so it usually does exist):
-      ```bash
-      EXISTING_SHA=$(gh api repos/<playbook_repo>/contents/$TARGET?ref=$BRANCH --jq .sha 2>/dev/null || echo "")
-      ```
+After both distillers have run, decide whether to open a PR.
 
-   c. Write the patched file contents to the branch via `gh api -X PUT`.
-      Include `-f sha="$EXISTING_SHA"` only when `$EXISTING_SHA` is
-      non-empty (the API rejects empty-string SHAs but requires the SHA
-      for updates):
-      ```bash
-      if [ -n "$EXISTING_SHA" ]; then
-        gh api -X PUT repos/<playbook_repo>/contents/$TARGET \
-          -f message="agent-craft: $MODE from <project_repo> vX.Y" \
-          -f content="$(echo "$PATCHED" | base64 -w0)" \
-          -f branch="$BRANCH" \
-          -f sha="$EXISTING_SHA"
-      else
-        gh api -X PUT repos/<playbook_repo>/contents/$TARGET \
-          -f message="agent-craft: $MODE from <project_repo> vX.Y" \
-          -f content="$(echo "$PATCHED" | base64 -w0)" \
-          -f branch="$BRANCH"
-      fi
-      ```
+1. If `LEARNING_COMMITS` is `0`, no distiller produced output. Tear
+   down the local learning branch and return to the film-room fix
+   branch:
+   ```bash
+   git checkout film-room/<version_label>
+   git branch -D learning/film-room-vX.Y
+   ```
+   Continue to Step 4.6.
 
-   d. Open the PR:
-      ```bash
-      printf '%s' "$PR_BODY_AC" > /tmp/agent-craft.prbody.md
-      gh pr create --repo <playbook_repo> \
-        --base main \
-        --head "$BRANCH" \
-        --title "agent-craft: $MODE from <project_repo> vX.Y film-room" \
-        --body-file /tmp/agent-craft.prbody.md
-      ```
+2. Otherwise, push the branch and open the PR:
+   ```bash
+   git push -u origin learning/film-room-vX.Y
+   ```
+
+3. Build the combined PR body. Include only the sections from distillers
+   that contributed:
+   ```markdown
+   # Learning from vX.Y film-room
+
+   <if PROJECT_PR_BODY non-empty:>
+   ## Project lessons (from project distiller)
+
+   <PROJECT_PR_BODY>
+
+   <if AGENT_CRAFT_PR_BODY non-empty:>
+   ## Agent-craft (from agent-craft distiller)
+
+   <AGENT_CRAFT_PR_BODY>
+   ```
+   Write to `/tmp/learning.prbody.md`.
+
+4. Open the PR against the project repo:
+   ```bash
+   gh pr create --repo <repo> \
+     --base main \
+     --head learning/film-room-vX.Y \
+     --title "Learning from vX.Y film-room" \
+     --body-file /tmp/learning.prbody.md
+   ```
+
+5. Return to the film-room fix branch:
+   ```bash
+   git checkout film-room/<version_label>
+   ```
 
    Tell the user the PR URL.
 
 #### Tell the user what happened
 
-Before moving to Step 5, summarize:
+Before moving to Step 4.6, summarize:
 
 > "Distillers complete:
-> - Project distiller: <PR link, or 'no lessons proposed'>
-> - Agent-craft distiller: <PR link, or 'no signals this session'>"
+> - Project distiller: <commit added | no lessons proposed | skipped>
+> - Agent-craft distiller: <commit added | no signals this session | skipped>
+> - Combined learning PR: <PR link, or 'none — both distillers had nothing to add'>"
 
 ### Step 4.6 — Run the classifier (metrics)
 

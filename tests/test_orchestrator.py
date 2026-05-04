@@ -49,6 +49,56 @@ def _mock_issue(number, title, body, project_item_id="item_1"):
     }
 
 
+def test_load_project_addendum_returns_file_contents_when_present(tmp_path, monkeypatch):
+    from orchestrator import _load_project_addendum
+    addendum_dir = tmp_path / ".playbook" / "agents"
+    addendum_dir.mkdir(parents=True)
+    (addendum_dir / "coding.md").write_text("- Always run linter before committing.")
+    monkeypatch.chdir(tmp_path)
+    assert _load_project_addendum("coding") == "- Always run linter before committing."
+
+
+def test_load_project_addendum_returns_empty_when_missing(tmp_path, monkeypatch):
+    from orchestrator import _load_project_addendum
+    monkeypatch.chdir(tmp_path)
+    assert _load_project_addendum("coding") == ""
+
+
+@patch("orchestrator.subprocess.Popen")
+@patch("orchestrator.GitHubClient")
+def test_dispatch_coding_agent_includes_project_addendum(MockGH, MockPopen, config, state_dir, tmp_path, monkeypatch):
+    """When .playbook/agents/coding.md exists in cwd, its contents flow into the dispatched coding command."""
+    addendum_dir = tmp_path / ".playbook" / "agents"
+    addendum_dir.mkdir(parents=True)
+    (addendum_dir / "coding.md").write_text("ADDENDUM_FROM_PROJECT_FILE_CODING")
+    monkeypatch.chdir(tmp_path)
+
+    mock_gh = MockGH.return_value
+    mock_issue = _mock_issue(42, "[v0.1] Fix bug", "Body\n## Acceptance Criteria\n- [ ] works")
+    mock_gh.fetch_issues_by_status.side_effect = lambda s: [mock_issue] if s == "ai-ready" else []
+    mock_gh.get_attempt_count.return_value = 0
+
+    mock_proc = MagicMock()
+    mock_proc.pid = 99999
+    MockPopen.return_value = mock_proc
+
+    orch = Orchestrator.__new__(Orchestrator)
+    orch.config = config
+    orch.statuses = config["statuses"]
+    orch.gh = mock_gh
+    orch.state = __import__("state").StateManager(state_dir)
+    orch.slack = __import__("notifications.slack", fromlist=["SlackNotifier"]).SlackNotifier(None)
+    orch.coding_agent = __import__("agents.coding", fromlist=["CodingAgent"]).CodingAgent()
+    orch.testing_agent = __import__("agents.testing", fromlist=["TestingAgent"]).TestingAgent()
+    orch.review_agent = __import__("agents.review", fromlist=["ReviewAgent"]).ReviewAgent()
+
+    orch.run()
+
+    MockPopen.assert_called_once()
+    cmd_argv = MockPopen.call_args[0][0]
+    assert "ADDENDUM_FROM_PROJECT_FILE_CODING" in " ".join(cmd_argv)
+
+
 @patch("orchestrator.subprocess.Popen")
 @patch("orchestrator.GitHubClient")
 def test_dispatch_coding_agent(MockGH, MockPopen, config, state_dir):
