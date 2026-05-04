@@ -146,7 +146,7 @@ def test_generate_summary_posts_to_slack(MockGH):
     mock_gh.fetch_issues_by_status.side_effect = lambda s: [_mock_issue(1, "Fix bug")] if s == "ai-complete" else []
 
     config = {
-        "repos": ["owner/repo"],
+        "repo": "owner/repo",
         "project": {"owner": "owner", "number": 1, "status_field_id": "PVTSSF_test"},
         "branches": {"integration": "ai/dev"},
         "slack": {"webhook_url": "https://hooks.slack.com/test"},

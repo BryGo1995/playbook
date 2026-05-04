@@ -45,7 +45,7 @@ class Orchestrator:
             project_number=config["project"]["number"],
             status_field_id=config["project"]["status_field_id"],
         )
-        self.state = StateManager(state_dir or os.path.expanduser("~/.agent-orchestrator"))
+        self.state = StateManager(state_dir)
         self.slack = SlackNotifier(config["slack"].get("webhook_url"))
         self.coding_agent = CodingAgent()
         self.testing_agent = TestingAgent()

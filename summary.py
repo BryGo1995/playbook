@@ -21,7 +21,7 @@ from logger import setup_logger
 
 logger = setup_logger("summary")
 
-STATE_FILE = os.path.expanduser("~/.agent-orchestrator/summary_state.json")
+STATE_FILE = os.path.join(os.getcwd(), ".playbook", "summary_state.json")
 
 
 def load_last_run() -> datetime:
@@ -155,7 +155,7 @@ def format_summary(repo: str, categories: dict, since: datetime, now: datetime, 
 
 
 def generate_summary(config: dict, since: datetime | None = None):
-    """Generate and post summaries for all configured repos."""
+    """Generate and post a summary for the project's repo."""
     now = datetime.now(timezone.utc)
     if since is None:
         since = load_last_run()
@@ -187,7 +187,7 @@ def generate_summary(config: dict, since: datetime | None = None):
         return
 
     categories = categorize_issues(issues_by_status, statuses)
-    repo = config["repos"][0]
+    repo = config["repo"]
     message = format_summary(repo, categories, since, now, integration_branch)
     slack.send(message)
     logger.info(f"Summary posted for {repo}")
@@ -200,8 +200,7 @@ def main():
     parser.add_argument("--since", type=str, help="Duration to look back (e.g. '12h', '2h', '30m')")
     args = parser.parse_args()
 
-    config_path = os.path.join(os.path.dirname(__file__), "config.yaml")
-    config = load_config(config_path)
+    config = load_config()  # Reads playbook.yaml from CWD, merges with defaults.yaml
 
     since = None
     if args.since:

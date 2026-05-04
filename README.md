@@ -74,11 +74,11 @@ List your projects in `run-all.sh`, then add to `crontab -e`:
 GITHUB_TOKEN=your_token
 SLACK_WEBHOOK_URL=your_webhook
 
-# Dispatch agents every 10 minutes
+# Dispatch agents every 10 minutes (iterates the projects you list in run-all.sh)
 */10 * * * * /path/to/playbook/run-all.sh >> /var/log/playbook.log 2>&1
 
-# Morning / evening Slack summaries
-0 8,20 * * * cd /path/to/playbook && python3 summary.py >> /var/log/playbook.log 2>&1
+# Morning / evening Slack summaries — one line per project
+0 8,20 * * * cd /path/to/your-project && PYTHONPATH=/path/to/playbook python3 -c 'from summary import main; main()' >> /var/log/playbook.log 2>&1
 ```
 
 `run-all.sh` iterates each project directory you list and runs the orchestrator against that project's `playbook.yaml`.
