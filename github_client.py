@@ -46,20 +46,51 @@ class GitHubClient:
     # --- Project metadata ---
 
     def load_project_metadata(self, owner: str, project_number: int, status_field_id: str):
-        """Load project ID and status option IDs. Call once at startup."""
-        data = self._graphql(
-            """
-            query($owner: String!, $number: Int!) {
-                user(login: $owner) {
-                    projectV2(number: $number) {
-                        id
-                    }
+        """Load project ID and status option IDs. Call once at startup.
+
+        Supports both user-owned and organization-owned GitHub Projects v2.
+        Tries the user branch first, falls back to the organization branch.
+        """
+        variables = {"owner": owner, "number": project_number}
+        project_id = None
+
+        for owner_kind, query in (
+            (
+                "user",
+                """
+                query($owner: String!, $number: Int!) {
+                    user(login: $owner) { projectV2(number: $number) { id } }
                 }
-            }
-            """,
-            {"owner": owner, "number": project_number},
-        )
-        self._project_id = data["user"]["projectV2"]["id"]
+                """,
+            ),
+            (
+                "organization",
+                """
+                query($owner: String!, $number: Int!) {
+                    organization(login: $owner) { projectV2(number: $number) { id } }
+                }
+                """,
+            ),
+        ):
+            try:
+                data = self._graphql(query, variables)
+            except RuntimeError:
+                # The non-matching kind (user when owner is an org, or vice versa)
+                # returns a GraphQL error; try the other kind.
+                continue
+            node = data.get(owner_kind)
+            if node and node.get("projectV2"):
+                project_id = node["projectV2"]["id"]
+                break
+
+        if project_id is None:
+            raise RuntimeError(
+                f"Could not find Projects v2 #{project_number} owned by '{owner}'. "
+                "Verify the owner login and project number, and confirm the "
+                "GITHUB_TOKEN has the 'project' scope."
+            )
+
+        self._project_id = project_id
         self._status_field_id = status_field_id
 
         # Load status option IDs

@@ -306,6 +306,81 @@ def test_get_latest_agent_stop_comment_picks_most_recent_when_duplicates(client)
     assert client.get_latest_agent_stop_comment("owner/repo", 42, 1) == "later"
 
 
+def _make_resp(payload, status_code=200):
+    resp = MagicMock()
+    resp.status_code = status_code
+    resp.json.return_value = payload
+    resp.raise_for_status = MagicMock()
+    return resp
+
+
+def _status_options_payload():
+    return {"data": {"node": {"field": {"options": [
+        {"id": "opt_ready", "name": "ai-ready"},
+        {"id": "opt_done", "name": "Done"},
+    ]}}}}
+
+
+def test_load_project_metadata_resolves_user_owned_project():
+    """User-owned Projects v2 resolve via the user branch."""
+    with patch("github_client.requests") as mock_requests:
+        c = GitHubClient(token="fake")
+        user_payload = {"data": {"user": {"projectV2": {"id": "PVT_user_proj"}}}}
+        mock_requests.post.side_effect = [
+            _make_resp(user_payload),
+            _make_resp(_status_options_payload()),
+        ]
+        c.load_project_metadata("alice", 1, "PVTSSF_x")
+        assert c._project_id == "PVT_user_proj"
+        assert c._status_field_id == "PVTSSF_x"
+        assert c._status_option_ids == {"ai-ready": "opt_ready", "Done": "opt_done"}
+
+
+def test_load_project_metadata_falls_back_to_organization():
+    """When the user query errors (owner is an org), the org branch is used."""
+    with patch("github_client.requests") as mock_requests:
+        c = GitHubClient(token="fake")
+        # First call: user branch errors (owner is an organization)
+        user_err_payload = {"errors": [{"message": "Could not resolve to a User"}]}
+        org_payload = {"data": {"organization": {"projectV2": {"id": "PVT_org_proj"}}}}
+        mock_requests.post.side_effect = [
+            _make_resp(user_err_payload),
+            _make_resp(org_payload),
+            _make_resp(_status_options_payload()),
+        ]
+        c.load_project_metadata("acme-org", 7, "PVTSSF_y")
+        assert c._project_id == "PVT_org_proj"
+
+
+def test_load_project_metadata_falls_back_when_user_returns_null():
+    """When the user query succeeds but returns null (rare), still try org branch."""
+    with patch("github_client.requests") as mock_requests:
+        c = GitHubClient(token="fake")
+        user_null = {"data": {"user": None}}
+        org_payload = {"data": {"organization": {"projectV2": {"id": "PVT_org_proj"}}}}
+        mock_requests.post.side_effect = [
+            _make_resp(user_null),
+            _make_resp(org_payload),
+            _make_resp(_status_options_payload()),
+        ]
+        c.load_project_metadata("acme-org", 7, "PVTSSF_y")
+        assert c._project_id == "PVT_org_proj"
+
+
+def test_load_project_metadata_raises_when_neither_kind_has_project():
+    """When neither user nor org has the project, raise a clear error."""
+    with patch("github_client.requests") as mock_requests:
+        c = GitHubClient(token="fake")
+        user_err = {"errors": [{"message": "Could not resolve to a User"}]}
+        org_err = {"errors": [{"message": "Could not resolve to an Organization"}]}
+        mock_requests.post.side_effect = [
+            _make_resp(user_err),
+            _make_resp(org_err),
+        ]
+        with pytest.raises(RuntimeError, match="Could not find Projects v2"):
+            c.load_project_metadata("nobody", 99, "PVTSSF_z")
+
+
 def test_get_attempt_count_tolerates_non_numeric_attempt_in_json(client):
     """A malformed JSON block with a non-numeric attempt must not crash the counter."""
     mock_resp = MagicMock()
