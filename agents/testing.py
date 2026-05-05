@@ -1,12 +1,13 @@
 # agents/testing.py
 import os
-from agents.base import build_claude_command
+from agents.base import build_claude_command, BASE_BASH_DENY
 
 _PROMPT_PATH = os.path.join(os.path.dirname(__file__), "prompts", "testing.md")
 with open(_PROMPT_PATH) as _f:
     TESTING_PROMPT = _f.read()
 
 ALLOWED_TOOLS = ["Read", "Glob", "Grep", "Bash", "Write"]
+DISALLOWED_TOOLS = list(BASE_BASH_DENY)
 
 
 class TestingAgent:
@@ -46,5 +47,6 @@ class TestingAgent:
         return build_claude_command(
             prompt=prompt,
             allowed_tools=ALLOWED_TOOLS,
+            disallowed_tools=DISALLOWED_TOOLS,
             max_budget_usd=max_budget_usd,
         )

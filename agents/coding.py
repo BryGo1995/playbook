@@ -1,12 +1,13 @@
 # agents/coding.py
 import os
-from agents.base import build_claude_command
+from agents.base import build_claude_command, BASE_BASH_DENY
 
 _PROMPT_PATH = os.path.join(os.path.dirname(__file__), "prompts", "coding.md")
 with open(_PROMPT_PATH) as _f:
     CODING_PROMPT = _f.read()
 
 ALLOWED_TOOLS = ["Edit", "Write", "Bash", "Read", "Glob", "Grep"]
+DISALLOWED_TOOLS = list(BASE_BASH_DENY)
 
 
 class CodingAgent:
@@ -55,5 +56,6 @@ class CodingAgent:
         return build_claude_command(
             prompt=prompt,
             allowed_tools=ALLOWED_TOOLS,
+            disallowed_tools=DISALLOWED_TOOLS,
             max_budget_usd=max_budget_usd,
         )

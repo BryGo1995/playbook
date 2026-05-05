@@ -1,12 +1,21 @@
 # agents/review.py
 import os
-from agents.base import build_claude_command
+from agents.base import build_claude_command, BASE_BASH_DENY
 
 _PROMPT_PATH = os.path.join(os.path.dirname(__file__), "prompts", "review.md")
 with open(_PROMPT_PATH) as _f:
     REVIEW_PROMPT = _f.read()
 
 ALLOWED_TOOLS = ["Read", "Glob", "Grep", "Bash"]
+# Review agent is strictly read-only — never pushes, commits, or merges anything.
+DISALLOWED_TOOLS = list(BASE_BASH_DENY) + [
+    "Bash(git push)",
+    "Bash(git push *)",
+    "Bash(git commit)",
+    "Bash(git commit *)",
+    "Bash(git merge)",
+    "Bash(git merge *)",
+]
 
 
 class ReviewAgent:
@@ -46,5 +55,6 @@ class ReviewAgent:
         return build_claude_command(
             prompt=prompt,
             allowed_tools=ALLOWED_TOOLS,
+            disallowed_tools=DISALLOWED_TOOLS,
             max_budget_usd=max_budget_usd,
         )

@@ -96,6 +96,95 @@ def test_review_agent_builds_prompt():
     assert "review" in prompt.lower()
 
 
+def test_build_claude_command_includes_disallowed_tools_when_provided():
+    cmd = build_claude_command(
+        prompt="x",
+        allowed_tools=["Bash"],
+        disallowed_tools=["Bash(git push --force*)", "Bash(gh pr merge*)"],
+    )
+    assert "--disallowedTools" in cmd
+    deny_idx = cmd.index("--disallowedTools") + 1
+    deny_str = cmd[deny_idx]
+    assert "Bash(git push --force*)" in deny_str
+    assert "Bash(gh pr merge*)" in deny_str
+
+
+def test_build_claude_command_omits_disallowed_when_none_or_empty():
+    cmd1 = build_claude_command(prompt="x", allowed_tools=["Bash"])
+    cmd2 = build_claude_command(prompt="x", allowed_tools=["Bash"], disallowed_tools=[])
+    assert "--disallowedTools" not in cmd1
+    assert "--disallowedTools" not in cmd2
+
+
+def _deny_str(cmd: list[str]) -> str:
+    """Extract the --disallowedTools argument value from a built command."""
+    assert "--disallowedTools" in cmd, "command missing --disallowedTools"
+    return cmd[cmd.index("--disallowedTools") + 1]
+
+
+def test_coding_agent_denies_force_push_variations():
+    cmd = CodingAgent().build_command(
+        issue_title="t", issue_body="b", issue_number=1, repo="o/r",
+    )
+    deny = _deny_str(cmd)
+    # Cover --force, --force-with-lease, -f short form, and rearranged-arg forms
+    assert "Bash(git push --force" in deny
+    assert "Bash(git push * --force" in deny
+    assert "Bash(git push -f" in deny
+
+
+def test_coding_agent_denies_push_to_main_or_master():
+    cmd = CodingAgent().build_command(
+        issue_title="t", issue_body="b", issue_number=1, repo="o/r",
+    )
+    deny = _deny_str(cmd)
+    assert "Bash(git push * main)" in deny
+    assert "Bash(git push * master)" in deny
+    # Also the refspec forms (HEAD:main, foo:main)
+    assert ":main" in deny
+    assert ":master" in deny
+
+
+def test_coding_agent_denies_branch_deletion_via_push():
+    cmd = CodingAgent().build_command(
+        issue_title="t", issue_body="b", issue_number=1, repo="o/r",
+    )
+    deny = _deny_str(cmd)
+    assert "Bash(git push * --delete" in deny or "Bash(git push --delete" in deny
+
+
+def test_coding_agent_denies_gh_destructive_commands():
+    cmd = CodingAgent().build_command(
+        issue_title="t", issue_body="b", issue_number=1, repo="o/r",
+    )
+    deny = _deny_str(cmd)
+    assert "gh pr merge" in deny  # orchestrator merges, not the agent
+    assert "gh repo delete" in deny
+
+
+def test_testing_agent_inherits_base_deny_patterns():
+    cmd = TestingAgent().build_command(
+        issue_title="t", issue_body="b", issue_number=1, repo="o/r", pr_branch="b",
+    )
+    deny = _deny_str(cmd)
+    assert "Bash(git push --force" in deny
+    assert "Bash(git push * main)" in deny
+    assert "gh pr merge" in deny
+
+
+def test_review_agent_denies_all_git_push_and_writes():
+    """Review agent is read-only — no push, no commit, no merge of any kind."""
+    cmd = ReviewAgent().build_command(
+        issue_title="t", issue_body="b", issue_number=1, repo="o/r", pr_number=1,
+    )
+    deny = _deny_str(cmd)
+    # Inherits base patterns
+    assert "Bash(git push --force" in deny
+    # AND denies all push, commit, merge
+    assert "Bash(git push)" in deny or "Bash(git push *)" in deny
+    assert "Bash(git commit)" in deny or "Bash(git commit *)" in deny
+
+
 def test_claude_command_uses_path_not_absolute():
     """The claude binary should be resolved via PATH, not a hardcoded absolute path."""
     cmd = build_claude_command("test prompt", ["Read", "Write"])
