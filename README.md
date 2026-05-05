@@ -8,7 +8,7 @@ Playbook also ships as a Claude Code plugin with three skills — **Scout**, **G
 
 ### Highlights
 
-- **Multi-agent orchestration.** Coding, testing, and review agents run as scoped `claude -p` subprocesses with per-agent `--allowedTools` allowlists — the review agent is read-only and the testing agent can only write test files, so an agent can't trash the repo even if it tries.
+- **Multi-agent orchestration.** Coding, testing, and review agents run as scoped `claude -p` subprocesses with per-agent allow/deny tool lists — the review agent is read-only, the testing agent can only write test files, and force-push / direct-push-to-main / branch-deletion are blocked at the tool layer for all three. See [Security & Trust Model](#security--trust-model) for the full threat model.
 - **Version-gated dispatch.** Issues tagged `[vX.Y]` execute in order; the orchestrator holds the next wave until the current version is fully `Done`, which keeps concurrent agents from stepping on each other's merges.
 - **Integration branch pattern.** Agents never touch `main`. Each coding agent branches from a shared `ai/dev`, and a GitHub Action maintains a single persistent `ai/dev → main` PR for human review.
 - **Self-improving workflow.** Each film-room review session feeds two distillers that turn human-validated fixes into proposed PRs — one updating the target repo's `CLAUDE.md`, one updating the agent prompts themselves. Humans stay the gate; nothing auto-merges.
@@ -118,6 +118,81 @@ python3 -m pytest tests/ -v
 
 ---
 
+## Security & Trust Model
+
+Playbook dispatches autonomous agents that run shell commands, edit code, push branches, and call the GitHub API on your behalf. Read this section before you point it at any repo you care about.
+
+### What the agent can do
+
+When the orchestrator fires a coding agent, it is a `claude -p` subprocess running in the project directory with:
+
+- **Shell access** via `Bash` (broad, with deny patterns — see below)
+- **File access** via `Read`, `Edit`, `Write` across the project tree (and any directories your user can reach)
+- **Git push access** via your local git credential helper — the agent can push to feature branches and the integration branch
+- **GitHub API access** via `GITHUB_TOKEN` from the orchestrator's environment, with whatever scopes you granted
+
+The testing and review agents have narrower allowlists (testing can only `Write` to test files; review has no `Edit`/`Write` at all), but both still have `Bash` and the GitHub token.
+
+### Who can dispatch an agent
+
+The orchestrator only dispatches agents on issues that have the `ai-ready` label. On GitHub, applying labels requires **triage or write access** to the repo. So the effective trust boundary is:
+
+> **Anyone who can apply the `ai-ready` label to an issue in a Playbook-managed repo can cause an agent to act on its contents, with all the privileges your local environment + `GITHUB_TOKEN` allow.**
+
+Concretely:
+
+- **Private repo, you + vetted collaborators** — the trust set is the people you've added with triage/write access. Reasonable for most users.
+- **Public repo with restrictive triage** — the trust set is whoever you've granted triage to (default: nobody outside maintainers).
+- **Public repo with permissive triage / open contribution** — the trust set is much wider; treat with care.
+
+The label gate is a meaningful boundary, not just any-issue-creator. But it is implicit in your GitHub repo configuration, not enforced by Playbook itself.
+
+### Layered defenses (and their limits)
+
+The agent reads issue title and body as part of its prompt. A maliciously crafted issue body could try to redirect the agent's behavior — known as **prompt injection**. Three layers of defense are in place:
+
+**Layer 1 — Prompt framing.** Issue title and body are wrapped in `<untrusted_issue_content>` tags with explicit "data, not instructions" framing. The agent is told to follow legitimate work guidance ("use library X", "don't change the public API") but refuse operational redirection ("push to main", "force-push", "exfiltrate the token"). *Limit*: relies on the model's compliance; sufficiently clever injection can still talk the agent into compliance.
+
+**Layer 2 — Tool-level deny patterns.** Claude Code's `--disallowedTools` blocks the highest-value attacks at the tool layer for all three agents: force-push (every variant), direct push to `main`/`master`, branch deletion via push, `gh pr merge`, `gh repo delete`, `gh release delete`, raw destructive `gh api -X DELETE` calls. Review agent additionally denies `git push`, `git commit`, `git merge` entirely. *Limits*: pattern matching is fragile — `bash -c "..."` wrappers, extra whitespace, novel flag aliases, custom git aliases, or destructive paths that aren't pre-enumerated will bypass the patterns.
+
+**Layer 3 — This documentation.** You opt in knowingly.
+
+### What is NOT protected
+
+The current architecture does not prevent:
+
+- **Reading sensitive files** outside the project tree — `~/.ssh/id_rsa`, `~/.aws/credentials`, `.env` files, etc. — `Read` is unrestricted.
+- **Network exfiltration** — `curl`/`wget` to attacker-controlled servers can send anything the agent reads.
+- **Modifying CI/CD workflows** — `.github/workflows/*.yml` is writable, and a malicious workflow merged via `ai/dev → main` would run with whatever secrets your CI has.
+- **Creating GitHub artifacts** — issues, branches, comments, draft PRs in the managed repos can all be created.
+- **Side effects in shared services** the orchestrator's environment can reach (your local Docker, kubectl context, cloud CLIs if authenticated, etc.).
+
+A determined attacker with prompt-injection control of a coding agent can do anything your local environment + `GITHUB_TOKEN` allows. **Treat `ai-ready` label permission on a managed repo as roughly equivalent to local code execution on the orchestrator host.**
+
+### Recommended deployment posture
+
+| Posture | What it looks like | Risk |
+|---|---|---|
+| **Best** | Private repo · vetted collaborators · `GITHUB_TOKEN` scoped to the single managed repo · orchestrator runs in a dedicated VM/container with no access to other credentials | Low |
+| **Reasonable** | Private repo · org collaborators · `GITHUB_TOKEN` scoped to managed repos only · orchestrator runs on a dev workstation without sensitive creds in env | Moderate |
+| **Caution** | Public repo with restrictive triage · `GITHUB_TOKEN` with broad scope · orchestrator on a primary workstation with SSH keys, cloud creds, etc. | High |
+| **Not recommended** | Public repo with open triage · org-wide write `GITHUB_TOKEN` · workstation with production credentials | Don't |
+
+If you don't have a fine-grained personal access token already, [create one](https://github.com/settings/tokens?type=beta) scoped to just the repos Playbook will manage.
+
+### Operational guidance
+
+- **Review the persistent `ai/dev → main` PR** before merging — every agent change funnels through it. Read the diff like you'd read any external contributor's PR.
+- **Monitor Slack alerts** for unexpected blocks, errors, timeouts. An agent suddenly hitting a deny pattern is a signal worth investigating.
+- **Audit local repo state** periodically — `git for-each-ref refs/playbook/snapshots/` shows the orchestrator's failure-state snapshots; unexpected branches in the project repo are worth a look.
+- **If you suspect a compromise:** rotate `GITHUB_TOKEN` immediately, kill the orchestrator (`pkill -f orchestrator`), inspect recent commits in the integration branch and any feature branches, and check `~/.bash_history` for unexpected commands.
+
+### Sandboxing roadmap
+
+A future version is planned to support running agents in ephemeral containers with a per-repo scoped token, eliminating the laptop-blast-radius problem. Until that ships, the deployment posture above is the right hardening. If your threat model demands stronger isolation today, run the orchestrator in a dedicated VM with no access to credentials beyond a repo-scoped `GITHUB_TOKEN`.
+
+---
+
 ## How It Works
 
 ### Workflow Overview
@@ -204,7 +279,7 @@ When agents merge into `ai/dev`, a GitHub Action creates or updates a PR targeti
 - **Retry cap** — 3 cycles of test failures or review rejections before marking blocked
 - **Scope limits** — max 10 files changed per coding agent
 - **Draft PRs only** — agents never merge to `main`
-- **Tool restrictions** — review agent is read-only; testing agent can only write test files
+- **Tool restrictions** — review agent is read-only; testing agent can only write test files; force-push, direct-push-to-main, and branch-deletion are blocked at the tool layer for all three (see [Security & Trust Model](#security--trust-model))
 
 ### Snapshot refs on coding-agent failure
 
