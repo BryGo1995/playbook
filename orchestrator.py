@@ -378,7 +378,12 @@ class Orchestrator:
             if is_bootstrap:
                 timeout = self.config.get("versioning", {}).get("bootstrap_timeout_minutes", 120)
                 budget = self.config.get("versioning", {}).get("bootstrap_max_budget_usd", 5.0)
-                self._dispatch_coding(issue, attempt_count + 1, timeout_override=timeout, budget_override=budget, integration_branch=integration_branch)
+                self._dispatch_coding(
+                    issue, attempt_count + 1,
+                    timeout_override=timeout,
+                    budget_override=budget,
+                    integration_branch=integration_branch,
+                )
             else:
                 self._dispatch_coding(issue, attempt_count + 1, integration_branch=integration_branch)
 

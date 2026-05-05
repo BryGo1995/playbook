@@ -1,0 +1,14 @@
+[tool.ruff]
+line-length = 140
+target-version = "py311"
+
+[tool.ruff.lint]
+# Conservative starter set: pycodestyle errors, pyflakes, warnings, bugbear.
+# Tighten over time (e.g. add I for isort, UP for pyupgrade) once the
+# codebase has had a cleanup pass for those.
+select = ["E", "F", "W", "B"]
+
+[tool.ruff.lint.per-file-ignores]
+# Test files often have intentionally compact mock setup; allow the long
+# fixture-construction lines without forcing artificial wrapping.
+"tests/*" = []

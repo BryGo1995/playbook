@@ -1,5 +1,4 @@
 # tests/test_state.py
-import json
 import os
 import pytest
 from state import StateManager

@@ -1,4 +1,3 @@
-import pytest
 from versioning import parse_version, get_active_version
 
 

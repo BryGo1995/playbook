@@ -1,8 +1,7 @@
 """Integration test for _snapshot_branch using real git in a temp repo (no GitHub)."""
-import os
 import subprocess
 import pytest
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 from orchestrator import Orchestrator
 
 

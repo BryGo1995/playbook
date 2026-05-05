@@ -1,9 +1,7 @@
 # tests/test_summary.py
-import json
-import os
 import pytest
 from datetime import datetime, timezone, timedelta
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 from summary import (
     categorize_issues,

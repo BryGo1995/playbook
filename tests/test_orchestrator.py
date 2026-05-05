@@ -1,8 +1,6 @@
 # tests/test_orchestrator.py
-import json
-import os
 import pytest
-from unittest.mock import patch, MagicMock, call
+from unittest.mock import patch, MagicMock
 from orchestrator import Orchestrator
 
 
@@ -147,7 +145,10 @@ def test_skip_already_active_issue(MockGH, MockPopen, config, state_dir):
     orch.coding_agent = __import__("agents.coding", fromlist=["CodingAgent"]).CodingAgent()
     orch.testing_agent = __import__("agents.testing", fromlist=["TestingAgent"]).TestingAgent()
     orch.review_agent = __import__("agents.review", fromlist=["ReviewAgent"]).ReviewAgent()
-    orch.state.add_agent(pid=11111, issue="owner/repo#42", repo="owner/repo", agent_type="coding", timeout_minutes=60, attempt=1, project_item_id="item_1")
+    orch.state.add_agent(
+        pid=11111, issue="owner/repo#42", repo="owner/repo",
+        agent_type="coding", timeout_minutes=60, attempt=1, project_item_id="item_1",
+    )
 
     with patch.object(orch, "_is_process_alive", return_value=True):
         orch.run()
@@ -178,7 +179,10 @@ def test_respects_concurrency_limit(MockGH, MockPopen, config, state_dir):
     orch.coding_agent = __import__("agents.coding", fromlist=["CodingAgent"]).CodingAgent()
     orch.testing_agent = __import__("agents.testing", fromlist=["TestingAgent"]).TestingAgent()
     orch.review_agent = __import__("agents.review", fromlist=["ReviewAgent"]).ReviewAgent()
-    orch.state.add_agent(pid=11111, issue="owner/repo#99", repo="owner/repo", agent_type="coding", timeout_minutes=60, attempt=1, project_item_id="item_99")
+    orch.state.add_agent(
+        pid=11111, issue="owner/repo#99", repo="owner/repo",
+        agent_type="coding", timeout_minutes=60, attempt=1, project_item_id="item_99",
+    )
 
     with patch.object(orch, "_is_process_alive", return_value=True):
         orch.run()
@@ -739,7 +743,8 @@ def test_dispatch_coding_retry_threads_stop_comment_into_prompt(
         _make_completed_process(0, stdout=" src/foo.py | 1 +"),
     ]
 
-    mock_proc = MagicMock(); mock_proc.pid = 12349
+    mock_proc = MagicMock()
+    mock_proc.pid = 12349
     MockPopen.return_value = mock_proc
 
     orch = Orchestrator(config, state_dir=state_dir)
@@ -771,7 +776,8 @@ def test_dispatch_coding_retry_with_no_snapshots_uses_feedback_only_variant(
         _make_completed_process(0, stdout=""),  # ls-remote returns nothing
     ]
 
-    mock_proc = MagicMock(); mock_proc.pid = 12347
+    mock_proc = MagicMock()
+    mock_proc.pid = 12347
     MockPopen.return_value = mock_proc
 
     orch = Orchestrator(config, state_dir=state_dir)
@@ -807,7 +813,8 @@ def test_dispatch_coding_retry_picks_highest_attempt_excluding_wip(
         _make_completed_process(0, stdout=" src/foo.py | 1 +"),
     ]
 
-    mock_proc = MagicMock(); mock_proc.pid = 12348
+    mock_proc = MagicMock()
+    mock_proc.pid = 12348
     MockPopen.return_value = mock_proc
 
     orch = Orchestrator(config, state_dir=state_dir)

@@ -1,5 +1,3 @@
-import json
-import pytest
 from prior_attempt import (
     STOP_TAG_PREFIX,
     render_prior_attempt_context,
