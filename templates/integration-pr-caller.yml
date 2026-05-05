@@ -15,7 +15,7 @@ permissions:
 
 jobs:
   integration-pr:
-    uses: BryGo1995/playbook/.github/workflows/integration-pr.yml@main
+    uses: BryGo1995/playbook/.github/workflows/integration-pr.yml@v1.4.0
     with:
       integration_branch: ${{ github.ref_name }}
       base_branch: main
