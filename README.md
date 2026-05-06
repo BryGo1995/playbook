@@ -4,16 +4,49 @@ A lightweight orchestrator that dispatches Claude Code headless agents to work o
 
 Playbook also ships as a Claude Code plugin with three skills — **Scout**, **Gameplan**, and **Film Room** — that cover design, planning, and post-run review.
 
-**Tech stack:** Python 3.11 · Anthropic Claude API (`claude -p` headless) · GitHub REST API (PyGithub) · Slack webhooks · cron
+**Tech stack:** Python 3.11 · Claude Code (`claude -p` headless, runs on your Pro/Max subscription — no `ANTHROPIC_API_KEY` required) · GitHub REST API (PyGithub) · Slack webhooks · cron
+
+## Contents
+
+- [Why Playbook](#why-playbook)
+- [Cost & Billing](#cost--billing)
+- [Usage](#usage) — [Prerequisites](#prerequisites) · [Install](#install) · [Per-Project Config](#per-project-config) · [Per-Repo Setup on GitHub](#per-repo-setup-on-github) · [Run It](#run-it) · [Day-to-Day](#day-to-day) · [Skills](#using-the-skills)
+- [Security & Trust Model](#security--trust-model)
+- [How It Works](#how-it-works) — [Workflow](#workflow-overview) · [Skills](#skills) · [Agents](#agents) · [Integration Branch Pattern](#integration-branch-pattern) · [Label State Machine](#label-state-machine) · [Version-Gated Dispatch](#version-gated-dispatch) · [Snapshot Refs](#snapshot-refs-on-coding-agent-failure) · [Slack Notifications](#slack-notifications) · [Learning Loop](#learning-loop) · [Quality Metrics](#quality-metrics)
 
 ### Highlights
 
-- **Multi-agent orchestration.** Coding, testing, and review agents run as scoped `claude -p` subprocesses with per-agent allow/deny tool lists — the review agent is read-only, the testing agent can only write test files, and force-push / direct-push-to-main / branch-deletion are blocked at the tool layer for all three. See [Security & Trust Model](#security--trust-model) for the full threat model.
-- **Version-gated dispatch.** Issues tagged `[vX.Y]` execute in order; the orchestrator holds the next wave until the current version is fully `Done`, which keeps concurrent agents from stepping on each other's merges.
-- **Integration branch pattern.** Agents never touch `main`. Each coding agent branches from a shared `ai/dev`, and a GitHub Action maintains a single persistent `ai/dev → main` PR for human review.
-- **Self-improving workflow.** Each film-room review session feeds two distillers that turn human-validated fixes into proposed PRs — one updating the target repo's `CLAUDE.md`, one updating the agent prompts themselves. Humans stay the gate; nothing auto-merges.
-- **Quality-signal metrics.** A structural check sharpens vague acceptance criteria at plan time; a classifier tags every film-room fix by where it should have been caught (`gameplan-criteria`, `coding-misread`, `gdd-gap`, etc.). Per-version data plus a cross-version rollup surface which part of the pipeline needs prompt tuning. Off by default, opt-in via one config flag.
-- **Guardrails out of the box.** Concurrency caps, per-agent timeouts, retry limits, ≤10-file scope caps, draft-only PRs, and Slack alerts on blocks / errors / timeouts plus 8am/8pm activity summaries.
+- **Multi-agent pipeline.** Separate coding, testing, and review agents run as `claude -p` subprocesses with per-agent tool allowlists — review is read-only, testing can only write to test files, and force-push / push-to-main / branch-deletion are blocked at the tool layer. See [Security & Trust Model](#security--trust-model).
+- **Version-gated dispatch.** Issues tagged `[vX.Y]` execute in waves — the orchestrator holds the next version until the current one is fully `Done`, preventing concurrent agents from clobbering each other's merges.
+- **Integration branch pattern.** Agents work on `ai/dev`, never `main`. A GitHub Action maintains one persistent `ai/dev → main` PR as the single human-review checkpoint.
+- **Self-improving workflow.** Each Film Room session distills human-validated fixes into proposed PRs — updating the target repo's `CLAUDE.md` and the agent prompts. Humans stay the gate; nothing auto-merges.
+- **Quality-signal metrics (opt-in).** A structural check sharpens vague acceptance criteria at plan time; a classifier tags every Film Room fix by upstream point of failure. Per-version files plus a cross-version rollup surface which part of the pipeline needs tuning.
+- **Guardrails.** Defaults: 60-min coding / 30-min testing / 30-min review timeouts, max 3 retry cycles, max 10 files per coding agent, draft-only PRs, Slack alerts on blocks/errors/timeouts plus 8am/8pm summaries.
+
+---
+
+## Why Playbook
+
+If you already pay for Claude Pro or Max and want autonomous agents working your GitHub issues overnight, your options today are roughly:
+
+| Tool | Where it runs | Billing | Best for |
+|---|---|---|---|
+| **GitHub Copilot Coding Agent** | Sandboxed cloud env | Bundled w/ Copilot subscription | Native GitHub UI, teams already on Copilot |
+| **Devin / Cursor Background Agents** | Cloud VMs | Subscription + per-task compute | Slick UI, parallel cloud agents |
+| **OpenHands** (OSS) | Local Docker | Your own API keys | Self-hosted, model-agnostic |
+| **Playbook** | Your laptop / your VM | **Your existing Claude subscription** | Solo devs who plan in versions, want background work overnight, and prefer local execution |
+
+Pick Playbook if you want to keep work local, you already have a Claude subscription, and you like the opinionated **GDD → versioned issues → integration branch → film-room review** workflow. Pick one of the cloud options if you want sandboxed execution, a polished web UI, or a team-oriented control plane.
+
+Playbook is **not** trying to be an enterprise agent platform. It's a single-developer tool with strong opinions about how solo project work should flow.
+
+## Cost & Billing
+
+Playbook runs Claude Code as a subprocess (`claude -p`), so agents authenticate with **whatever your local `claude` CLI is logged into** — typically your Claude Pro or Max subscription. **No `ANTHROPIC_API_KEY` is required**, and agent runs count against your subscription quota, not pay-per-token API billing.
+
+If you'd rather use API billing (e.g., your subscription quota is too small for overnight runs, or you want token-level cost visibility), set `ANTHROPIC_API_KEY` in your environment and Claude Code will prefer it. Mixing the two is fine — `claude` picks whichever auth is configured.
+
+The only billed Claude operation Playbook performs is the `claude -p` subprocess itself; the orchestrator, GitHub API calls, and Slack notifications cost nothing beyond your existing GitHub/Slack accounts.
 
 ---
 
@@ -22,8 +55,8 @@ Playbook also ships as a Claude Code plugin with three skills — **Scout**, **G
 ### Prerequisites
 
 - Python 3.11+
-- [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code) installed and authenticated
-- GitHub personal access token with `repo` scope
+- [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code) installed and logged in (`claude` — uses your Pro/Max subscription, no API key required; see [Cost & Billing](#cost--billing))
+- GitHub personal access token with `repo` scope ([create a fine-grained token](https://github.com/settings/tokens?type=beta) scoped to just the repos Playbook will manage)
 - (Optional) Slack incoming webhook URL
 
 ### Install
@@ -45,16 +78,16 @@ Each project you want agents working on needs a `playbook.yaml` at its root. Sha
 ```yaml
 # <project>/playbook.yaml
 repo: your-username/your-repo
-gdd_path: docs/my-project-gdd.md       # set by /playbook:scout
+gdd_path: docs/my-project-gdd.md       # populated by /playbook:scout
 orchestrator_dir: /path/to/playbook
 
 project:
   owner: your-username
   number: 1                             # GitHub Projects board number
-  status_field_id: "PVTSSF_..."         # Projects status field node ID
+  status_field_id: "PVTSSF_..."         # Projects status field node ID — populated by /playbook:gameplan
 ```
 
-Override any shared default (concurrency, timeouts, guardrails, versioning) by adding the same key to `playbook.yaml`.
+You don't have to fill `gdd_path` or `status_field_id` by hand — `/playbook:scout` and `/playbook:gameplan` create the GDD/PRD, set up (or detect) the GitHub Project board, and write both back into `playbook.yaml`. Minimum bootstrap config is just `repo` and `orchestrator_dir`. Any shared default (concurrency, timeouts, guardrails) can be overridden with the same key in `playbook.yaml`.
 
 ### Per-Repo Setup on GitHub
 
@@ -66,9 +99,30 @@ For each repo Playbook manages:
 4. Add agent instructions to the repo's `CLAUDE.md` (project standards, test commands, etc.).
 5. Copy `templates/integration-pr-caller.yml` to `.github/workflows/integration-pr.yml` in the target repo. This auto-creates a persistent `ai/dev -> main` PR whenever agents merge work. Edit branch names if yours differ. No secrets required.
 
-### Cron
+### Run It
 
-List your projects in `run-all.sh`, then add to `crontab -e`:
+Playbook is a script you can run two ways: once at a time (good for first-time evaluation), or on a cron schedule (the intended steady state).
+
+**Try it once.** From inside a project directory that has a `playbook.yaml`:
+
+```bash
+cd /path/to/your-project
+GITHUB_TOKEN=ghp_... PYTHONPATH=/path/to/playbook python3 -c 'from orchestrator import main; main()'
+```
+
+This runs one dispatch cycle: scans `ai-ready` issues, dispatches agents subject to concurrency caps, and exits. Run it again to advance state. No cron needed for evaluation.
+
+**Set up cron (steady state).** First, edit `run-all.sh` in the playbook repo and list each project you want included:
+
+```bash
+# In playbook/run-all.sh
+PROJECTS=(
+    "$HOME/code/my-project"
+    "$HOME/code/another-project"
+)
+```
+
+Each listed directory must contain a `playbook.yaml`. Then add to `crontab -e`:
 
 ```cron
 GITHUB_TOKEN=your_token
@@ -81,7 +135,7 @@ SLACK_WEBHOOK_URL=your_webhook
 0 8,20 * * * cd /path/to/your-project && PYTHONPATH=/path/to/playbook python3 -c 'from summary import main; main()' >> /var/log/playbook.log 2>&1
 ```
 
-`run-all.sh` iterates each project directory you list and runs the orchestrator against that project's `playbook.yaml`.
+`run-all.sh` iterates each project directory you listed and runs the orchestrator against that project's `playbook.yaml`. Per-agent stream-json logs land in `~/.agent-orchestrator/logs/`; orchestrator-cycle output goes wherever you redirect cron stdout (above: `/var/log/playbook.log`).
 
 ### Day-to-Day
 
@@ -110,6 +164,8 @@ Invoke inside any project with a `playbook.yaml`:
 - `/playbook:gameplan` — plan the next version and create agent-ready issues.
 - `/playbook:film-room` — review a completed version branch, fix issues, merge back.
 
+The typical first-run order is `/playbook:scout` → `/playbook:gameplan` → wait for the orchestrator to dispatch → `/playbook:film-room`. See [Skills](#skills) under "How It Works" for what each does in detail.
+
 ### Running Tests
 
 ```bash
@@ -132,6 +188,10 @@ When the orchestrator fires a coding agent, it is a `claude -p` subprocess runni
 - **GitHub API access** via `GITHUB_TOKEN` from the orchestrator's environment, with whatever scopes you granted
 
 The testing and review agents have narrower allowlists (testing can only `Write` to test files; review has no `Edit`/`Write` at all), but both still have `Bash` and the GitHub token.
+
+### A note on subscription auth
+
+Playbook invokes `claude -p` in your environment, so each agent inherits *your* Claude Code login. Anthropic's terms permit using your Pro/Max subscription for personal automation and your own agents — which is exactly what Playbook is. You are not sharing your credential with anyone; each user runs Playbook against their own account, and there's no "Playbook service" mediating the call. If you'd rather use API billing, set `ANTHROPIC_API_KEY` and Claude Code will prefer it.
 
 ### Who can dispatch an agent
 
@@ -217,11 +277,9 @@ Auto-merge    → PR merged into ai/dev
 
 ### Skills
 
-**Scout** guides you through creating a Game Design Document or Product Requirements Document via conversational interview. Ships templates for Game, Application, and Library projects; custom templates can be added to `skills/scout/templates/`. Outputs to `docs/<project>-gdd.md` (or `-prd.md`) and updates `gdd_path` in `playbook.yaml`.
-
-**Gameplan** reads the GDD/PRD, analyzes repo state and the project board, proposes the next version's scope, and creates conflict-free issues using a structured template (acceptance criteria, file scope, testing criteria). Its conflict-avoidance strategy adapts to the `max_coding` concurrency setting.
-
-**Film Room** runs a post-agent review session on a completed version branch. Sets up a tracking issue and fix branch, manages a checklist as you identify problems, and handles merge-back when you're done.
+- **Scout** — conversational interview to create or iterate on a GDD/PRD. Ships templates for Game, Application, and Library projects (custom templates: `skills/scout/templates/`). Outputs to `docs/<project>-gdd.md` and updates `gdd_path` in `playbook.yaml`.
+- **Gameplan** — reads the GDD, analyzes repo state and the project board, proposes the next version's scope, and creates conflict-free issues using a structured template. Conflict-avoidance adapts to the `max_coding` setting.
+- **Film Room** — post-version review session. Sets up a tracking issue and fix branch, manages a checklist of issues you find, handles merge-back, and triggers the [learning loop](#learning-loop).
 
 ### Agents
 
@@ -245,6 +303,10 @@ main (you control)
         └── ai/issue-3
 ```
 
+When agents merge into `ai/dev`, a GitHub Action creates or updates a single PR targeting `main`. The PR body lists every `Closes #N` reference from the commit log, so merging auto-closes the issues.
+
+> **Important:** always merge the integration PR with a regular merge commit, not squash. Squashing causes `ai/dev` and `main` to diverge and leads to ghost conflicts on future PRs.
+
 ### Label State Machine
 
 ```
@@ -266,44 +328,19 @@ Issues are dispatched in version order based on `[vX.Y]` tags in titles. The orc
 
 All issues in a version must be safe to run in parallel (no shared file writes). A blocked issue holds the version open until resolved. Slack fires when a version completes.
 
-### Integration PR Workflow
-
-When agents merge into `ai/dev`, a GitHub Action creates or updates a PR targeting `main`. The PR body lists every `Closes #N` reference from the commit log, so merging auto-closes the issues.
-
-> **Important:** always merge the integration PR with a regular merge commit, not squash. Squashing causes `ai/dev` and `main` to diverge and leads to ghost conflicts on future PRs.
-
-### Guardrails
-
-- **Concurrency limits** — configurable max agents per type
-- **Timeouts** — coding 60min, testing 30min, review 30min (default)
-- **Retry cap** — 3 cycles of test failures or review rejections before marking blocked
-- **Scope limits** — max 10 files changed per coding agent
-- **Draft PRs only** — agents never merge to `main`
-- **Tool restrictions** — review agent is read-only; testing agent can only write test files; force-push, direct-push-to-main, and branch-deletion are blocked at the tool layer for all three (see [Security & Trust Model](#security--trust-model))
-
 ### Snapshot refs on coding-agent failure
 
-When a coding agent times out or exits without creating a PR, the orchestrator
-pushes a forensic snapshot of the working tree as one or two remote refs:
+When a coding agent times out or exits without creating a PR, the orchestrator pushes a forensic snapshot of the working tree to `ai/issue-N-attempt-K` (committed state) and optionally `ai/issue-N-attempt-K-wip` (stashed dirty state). Subsequent retries feed these into the next agent's prompt as prior-attempt context.
 
-- `ai/issue-N-attempt-K` — the committed branch state at failure.
-- `ai/issue-N-attempt-K-wip` — uncommitted/untracked state captured via stash
-  (only present if the working tree was dirty).
+<details>
+<summary>Operational notes</summary>
 
-Subsequent retries read these refs to feed prior-attempt context into the new
-agent's prompt. Successful auto-merge cleans up all `ai/issue-N-attempt-*` refs
-for the issue. Issues that hit max retries leave their snapshots in place as
-forensic evidence.
+- Successful auto-merge cleans up all `ai/issue-N-attempt-*` refs for the issue. Max-retry failures leave snapshots in place as forensic evidence.
+- The `ai/issue-*` namespace must remain unprotected (no force-push protection) for snapshots to function. If protection blocks the push, the failure is recorded as `snapshot: unavailable` and recovery still proceeds.
+- Toggle off via `guardrails.snapshot_on_failure: false` in `playbook.yaml`.
+- The first retry of any existing issue after this feature ships has no prior snapshots — that is expected.
 
-**Operational notes:**
-
-- The `ai/issue-*` namespace must remain unprotected (no force-push protection)
-  for snapshots to function. If protection blocks the snapshot push, the failure
-  is recorded as `snapshot: unavailable` and recovery still proceeds.
-- Toggle off via `guardrails.snapshot_on_failure: false` in `defaults.yaml` or
-  the project's `playbook.yaml`.
-- The first time an existing issue retries after this feature ships, it has no
-  prior snapshots — that is expected, not a bug.
+</details>
 
 ### Slack Notifications
 
@@ -319,29 +356,12 @@ forensic evidence.
 
 ### Learning Loop
 
-Each film-room session ends by running two distillers that turn the
-human-validated fixes into proposed improvements. Both write **only to
-the project repo** — neither modifies the playbook installation, so
-project-specific signal can never leak into the upstream playbook
-prompts.
+Each Film Room session ends by running two distillers that turn human-validated fixes into proposed PRs. Both write **only to the project repo** — neither modifies the playbook installation, so project-specific signal cannot leak into the upstream playbook prompts.
 
-- **Project distiller** — proposes additions to the project repo's
-  `CLAUDE.md` so future agents working on the same repo pick up the
-  conventions automatically.
-- **Agent-craft distiller** — looks for failure modes of the agents
-  themselves (not project conventions) and either proposes a project-
-  local addendum to `.playbook/agents/{coding,review,testing}.md` (when
-  ≥2 fixes show the same pattern, or one severe occurrence) or appends
-  an entry to `.playbook/agent-craft-observations.md` for future
-  pattern-matching across versions of this project. Per-agent addenda
-  are loaded by the orchestrator at dispatch time and appended to the
-  matching agent's prompt — they are append-only and never round-trip
-  to the playbook repo.
+- **Project distiller** — proposes additions to the project's `CLAUDE.md` so future agents pick up the conventions.
+- **Agent-craft distiller** — captures recurring agent failure modes (≥2 fixes show the same pattern, or one severe case) as a project-local addendum in `.playbook/agents/{coding,review,testing}.md`, loaded by the orchestrator at dispatch and appended to the matching agent's prompt. Weaker signals accumulate in `.playbook/agent-craft-observations.md`.
 
-The two distillers share a single learning branch
-(`learning/film-room-vX.Y`) and combine into one PR against the project
-repo. The human is the gate — distillers never auto-merge. Disable
-per-project via `playbook.yaml`:
+Both distillers share a single branch (`learning/film-room-vX.Y`) and combine into one PR. The human is the gate — distillers never auto-merge. Disable per-project:
 
 ```yaml
 learning:
@@ -368,7 +388,8 @@ metrics:
 
 Format reference: `docs/metrics-format.md`.
 
-### Project Structure
+<details>
+<summary><strong>Project structure & runtime files</strong></summary>
 
 ```
 playbook/
@@ -382,27 +403,16 @@ playbook/
 ├── github_client.py         # GitHub API wrapper
 ├── logger.py                # structured JSON logger
 ├── setup.sh                 # one-time setup helper
-├── agents/
-│   ├── base.py              # shared claude -p command builder
-│   ├── coding.py
-│   ├── testing.py
-│   └── review.py
-├── notifications/
-│   └── slack.py
-├── .claude-plugin/
-│   ├── plugin.json
-│   └── marketplace.json
-├── skills/
-│   ├── scout/               # GDD/PRD creation
-│   ├── gameplan/            # version planning + issue decomposition
-│   └── film-room/           # post-run review session
-├── templates/
-│   └── integration-pr-caller.yml
+├── agents/                  # base.py + coding.py + testing.py + review.py
+├── notifications/slack.py
+├── .claude-plugin/          # plugin.json + marketplace.json
+├── skills/                  # scout/, gameplan/, film-room/
+├── templates/integration-pr-caller.yml
 ├── tests/
 └── docs/superpowers/        # specs and plans
 ```
 
-### Runtime Files
+Runtime files (created on first run):
 
 ```
 ~/.agent-orchestrator/
@@ -411,3 +421,5 @@ playbook/
 └── logs/
     └── <repo>-<issue>-<timestamp>.json   # per-agent stream-json logs
 ```
+
+</details>
