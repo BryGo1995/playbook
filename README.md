@@ -112,30 +112,30 @@ GITHUB_TOKEN=ghp_... PYTHONPATH=/path/to/playbook python3 -c 'from orchestrator 
 
 This runs one dispatch cycle: scans `ai-ready` issues, dispatches agents subject to concurrency caps, and exits. Run it again to advance state. No cron needed for evaluation.
 
-**Set up cron (steady state).** First, edit `run-all.sh` in the playbook repo and list each project you want included:
+**Set up cron (steady state).** First, list the projects you want included in `~/.config/playbook/projects.sh` (honors `XDG_CONFIG_HOME`):
 
 ```bash
-# In playbook/run-all.sh
+# In ~/.config/playbook/projects.sh
 PROJECTS=(
     "$HOME/code/my-project"
     "$HOME/code/another-project"
 )
 ```
 
-Each listed directory must contain a `playbook.yaml`. Then add to `crontab -e`:
+This file lives outside the playbook repo so your project list never travels with the distribution. Each listed directory must contain a `playbook.yaml`. Then add to `crontab -e`:
 
 ```cron
 GITHUB_TOKEN=your_token
 SLACK_WEBHOOK_URL=your_webhook
 
-# Dispatch agents every 10 minutes (iterates the projects you list in run-all.sh)
+# Dispatch agents every 10 minutes (iterates the projects in ~/.config/playbook/projects.sh)
 */10 * * * * /path/to/playbook/run-all.sh >> /var/log/playbook.log 2>&1
 
 # Morning / evening Slack summaries — one line per project
 0 8,20 * * * cd /path/to/your-project && PYTHONPATH=/path/to/playbook python3 -c 'from summary import main; main()' >> /var/log/playbook.log 2>&1
 ```
 
-`run-all.sh` iterates each project directory you listed and runs the orchestrator against that project's `playbook.yaml`. Per-agent stream-json logs land in `~/.agent-orchestrator/logs/`; orchestrator-cycle output goes wherever you redirect cron stdout (above: `/var/log/playbook.log`).
+`run-all.sh` reads `~/.config/playbook/projects.sh`, iterates each directory in that `PROJECTS` array, and runs the orchestrator against the project's `playbook.yaml`. Per-agent stream-json logs land in `~/.agent-orchestrator/logs/`; orchestrator-cycle output goes wherever you redirect cron stdout (above: `/var/log/playbook.log`).
 
 ### Day-to-Day
 

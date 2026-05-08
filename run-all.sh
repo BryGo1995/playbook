@@ -2,23 +2,30 @@
 # Playbook — Run orchestrator for all configured projects
 # Each project must have a playbook.yaml in its root.
 #
-# Configure your projects by editing the PROJECTS array below, e.g.:
+# Configure your project list outside this repo, in
+# ${XDG_CONFIG_HOME:-$HOME/.config}/playbook/projects.sh:
 #
 #   PROJECTS=(
 #       "$HOME/code/my-project"
 #       "$HOME/code/another-project"
 #   )
+#
+# The file is sourced as bash, so $HOME and other env vars expand normally.
 
 PLAYBOOK_DIR="$(cd "$(dirname "$0")" && pwd)"
 export PYTHONPATH="$PLAYBOOK_DIR"
 export PATH="$HOME/.local/bin:$PATH"
 
-PROJECTS=(
-    # Add absolute paths to your project directories here.
-)
+PROJECTS=()
+
+PROJECTS_CONFIG="${XDG_CONFIG_HOME:-$HOME/.config}/playbook/projects.sh"
+if [ -f "$PROJECTS_CONFIG" ]; then
+    # shellcheck disable=SC1090
+    source "$PROJECTS_CONFIG"
+fi
 
 if [ ${#PROJECTS[@]} -eq 0 ]; then
-    echo "[playbook] No projects configured. Edit PROJECTS in $0 to add project directories." >&2
+    echo "[playbook] No projects configured. Create $PROJECTS_CONFIG with a PROJECTS=(...) array of project directories." >&2
     exit 0
 fi
 
