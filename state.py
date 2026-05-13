@@ -37,6 +37,7 @@ class StateManager:
         timeout_minutes: int,
         attempt: int,
         project_item_id: str | None = None,
+        log_path: str | None = None,
     ):
         self.agents.append(
             {
@@ -48,6 +49,7 @@ class StateManager:
                 "timeout_minutes": timeout_minutes,
                 "attempt": attempt,
                 "project_item_id": project_item_id,
+                "log_path": log_path,
             }
         )
         self._save()

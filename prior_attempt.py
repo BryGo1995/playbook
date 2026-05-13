@@ -13,6 +13,13 @@ import re
 STOP_TAG_PREFIX = "[ai-coding-agent: stop attempt="
 ORCHESTRATOR_TAG = "[agent-orchestrator]"
 
+# Failure-kind discriminator stored in the diagnostic JSON block. Existing kinds
+# in the wild: "no-pr", "timeout". "budget-cap" is new in the tiered-retry
+# work — it means a prior attempt hit the per-attempt USD cap before committing,
+# which changes how the next attempt should be prompted (resume aggressively
+# rather than re-explore).
+KIND_BUDGET_CAP = "budget-cap"
+
 # Match a fenced ```json ... ``` block inside the comment. DOTALL so newlines match.
 _JSON_BLOCK_RE = re.compile(r"```json\s*\n(.*?)\n```", re.DOTALL)
 
@@ -40,6 +47,41 @@ def render_prior_attempt_context(
         f"{prior_count} previous {plural} did not complete."
     )
     lines.append("")
+
+    # Budget-cap retry preamble. When the most recent prior failure is a
+    # budget-cap exhaustion, the prior attempt produced real WIP that was killed
+    # mid-work — re-exploring the codebase wastes budget and is the exact thing
+    # that just blew up. Promote "resume" from a suggestion (the generic
+    # "How to use this" block below) to a directive.
+    latest = max(history, key=lambda e: e.get("attempt", 0))
+    if latest.get("kind") == KIND_BUDGET_CAP:
+        lines.append("### ⚠️ MANDATORY: Resume from the snapshot")
+        lines.append("")
+        lines.append(
+            "The previous attempt hit the per-attempt USD budget cap before "
+            "it could commit and push. Do NOT start from scratch on this retry."
+        )
+        lines.append("")
+        lines.append("On this attempt you MUST:")
+        lines.append(
+            "1. Check out the snapshot ref below directly as your starting point. "
+            "Do not branch from the integration branch."
+        )
+        lines.append(
+            "2. Use the diff-stat below as your map of what the prior attempt "
+            "already changed. Do NOT re-read those files unless you must verify "
+            "a specific line — every re-read costs budget."
+        )
+        lines.append(
+            "3. Prioritize committing and pushing forward progress over verifying "
+            "perfection. A PR with imperfect tests but working code is rescuable; "
+            "an uncommitted working tree is not."
+        )
+        lines.append(
+            "4. Commit incrementally as you go — do not save all commits for the "
+            "end. If the cap hits again, what's pushed is what survives."
+        )
+        lines.append("")
 
     # Failure history — one line per past attempt
     lines.append("### Failure history")

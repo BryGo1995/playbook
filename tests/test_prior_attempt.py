@@ -1,4 +1,5 @@
 from prior_attempt import (
+    KIND_BUDGET_CAP,
     STOP_TAG_PREFIX,
     render_prior_attempt_context,
     serialize_failure_comment,
@@ -81,6 +82,68 @@ def test_render_snapshot_unavailable():
     assert "no snapshot" in result.lower()
     assert "feedback only" in result.lower()
     assert "Files changed" not in result
+
+
+def test_render_emits_resume_preamble_when_latest_failure_is_budget_cap():
+    """When the prior attempt hit the budget cap, the next agent gets a MANDATORY
+    'resume from snapshot, don't re-explore' preamble. This is the whole point of
+    tiered retry — turn the agent's prior WIP into the starting point, not just an FYI.
+    """
+    history = [{"attempt": 1, "kind": KIND_BUDGET_CAP, "reason": "hit $5 cap"}]
+    result = render_prior_attempt_context(
+        history=history,
+        latest_diff_stat=" src/foo.py | 5 +",
+        snapshot_ref="ai/issue-42-attempt-1",
+        wip_ref="ai/issue-42-attempt-1-wip",
+        stop_comment=None,
+        attempt=2,
+        integration_branch="ai/dev",
+    )
+    # Preamble appears and is mandatory in tone
+    assert "MANDATORY" in result
+    assert "budget cap" in result.lower()
+    # Specific resume directives the agent should follow
+    assert "Check out the snapshot ref" in result
+    assert "do not re-read" in result.lower()
+    # Snapshot is still rendered (the existing block) so the agent has the ref to check out
+    assert "ai/issue-42-attempt-1" in result
+
+
+def test_render_does_not_emit_resume_preamble_for_non_budget_cap_failures():
+    """The MANDATORY-resume preamble is gated on budget-cap kind specifically —
+    no-pr and timeout failures don't get it (they may indicate the WIP is bad)."""
+    for kind in ("no-pr", "timeout"):
+        history = [{"attempt": 1, "kind": kind, "reason": "x"}]
+        result = render_prior_attempt_context(
+            history=history,
+            latest_diff_stat=" src/foo.py | 5 +",
+            snapshot_ref="ai/issue-42-attempt-1",
+            wip_ref=None,
+            stop_comment=None,
+            attempt=2,
+            integration_branch="ai/dev",
+        )
+        assert "MANDATORY" not in result, f"Preamble should not fire for kind={kind}"
+
+
+def test_render_emits_resume_preamble_only_when_latest_failure_is_budget_cap():
+    """Even with budget-cap in history, only fire the preamble when LATEST is budget-cap.
+    Mixed history where a later attempt failed for a different reason shouldn't
+    push the agent toward resuming WIP that may itself be the problem."""
+    history = [
+        {"attempt": 1, "kind": KIND_BUDGET_CAP, "reason": "hit cap"},
+        {"attempt": 2, "kind": "no-pr", "reason": "agent gave up"},
+    ]
+    result = render_prior_attempt_context(
+        history=history,
+        latest_diff_stat=" src/foo.py | 5 +",
+        snapshot_ref="ai/issue-42-attempt-2",
+        wip_ref=None,
+        stop_comment=None,
+        attempt=3,
+        integration_branch="ai/dev",
+    )
+    assert "MANDATORY" not in result
 
 
 def test_render_omits_reasoning_subsection_when_no_stop_comment():
