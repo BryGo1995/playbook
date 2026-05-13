@@ -15,6 +15,12 @@ guardrails:
   max_files_changed: 10
   max_retry_cycles: 3
   snapshot_on_failure: true
+  # Tiered retry for budget-cap failures: how many times to auto-resume after
+  # a coding agent hits coding_max_budget_usd before going to ai-blocked. The
+  # auto-resume retry is prompted to "resume from snapshot, don't re-explore."
+  # After this many budget-cap failures, the orchestrator stops retrying and
+  # waits for the user to manually move the issue back to ai-ready.
+  max_budget_cap_retries: 1
 
 versioning:
   enabled: true

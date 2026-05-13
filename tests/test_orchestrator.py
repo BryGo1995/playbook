@@ -927,3 +927,161 @@ def test_complete_issues_skips_cleanup_when_no_snapshots_exist(
         if "push" in c.args[0] and "--delete" in c.args[0]
     ]
     assert len(delete_calls) == 0
+
+
+# ---- Budget-cap tiered retry ----
+
+@patch("agent_result.detect_budget_cap_in_log", return_value=True)
+@patch("orchestrator.subprocess.run")
+@patch("orchestrator.GitHubClient")
+def test_handle_completion_classifies_budget_cap_when_log_signals_it(
+    MockGH, MockRun, MockDetect, config, state_dir
+):
+    """When agent_result detects error_max_budget_usd in the log, the failure
+    comment's kind is 'budget-cap' (not 'no-pr'). This is what enables the
+    tiered retry policy in _retry_error_issues to differentiate."""
+    mock_gh = MockGH.return_value
+    mock_gh.find_pr_for_branch.return_value = None
+    # Snapshot sequence: rev-parse + stash push + push branch
+    MockRun.side_effect = [
+        _make_completed_process(0),
+        _make_completed_process(0, stdout="No local changes to save."),
+        _make_completed_process(0),
+    ]
+    orch = Orchestrator(config, state_dir=state_dir)
+    agent = {
+        "pid": 99996, "issue": "owner/repo#42", "repo": "owner/repo",
+        "type": "coding", "started_at": "2026-05-01T00:00:00+00:00",
+        "timeout_minutes": 60, "attempt": 1, "project_item_id": "item_1",
+        "log_path": "/fake/log/path.json",
+    }
+    orch.state.agents = [agent]
+    orch._handle_completion(agent)
+
+    posted_bodies = [c.kwargs.get("body") or c.args[2] for c in mock_gh.add_comment.call_args_list]
+    assert any('"kind": "budget-cap"' in b for b in posted_bodies)
+    # And the log-detection helper was actually consulted
+    MockDetect.assert_called_once_with("/fake/log/path.json")
+
+
+@patch("agent_result.detect_budget_cap_in_log", return_value=False)
+@patch("orchestrator.subprocess.run")
+@patch("orchestrator.GitHubClient")
+def test_handle_completion_falls_back_to_no_pr_when_log_clean(
+    MockGH, MockRun, MockDetect, config, state_dir
+):
+    """If the log shows no budget-cap evidence, classification stays 'no-pr' as before.
+    This is the regression guard for non-budget failure modes."""
+    mock_gh = MockGH.return_value
+    mock_gh.find_pr_for_branch.return_value = None
+    MockRun.side_effect = [
+        _make_completed_process(0),
+        _make_completed_process(0, stdout="No local changes to save."),
+        _make_completed_process(0),
+    ]
+    orch = Orchestrator(config, state_dir=state_dir)
+    agent = {
+        "pid": 99995, "issue": "owner/repo#42", "repo": "owner/repo",
+        "type": "coding", "started_at": "2026-05-01T00:00:00+00:00",
+        "timeout_minutes": 60, "attempt": 1, "project_item_id": "item_1",
+        "log_path": "/fake/log/path.json",
+    }
+    orch.state.agents = [agent]
+    orch._handle_completion(agent)
+
+    posted_bodies = [c.kwargs.get("body") or c.args[2] for c in mock_gh.add_comment.call_args_list]
+    assert any('"kind": "no-pr"' in b for b in posted_bodies)
+    assert not any('"kind": "budget-cap"' in b for b in posted_bodies)
+
+
+@patch("orchestrator.GitHubClient")
+def test_retry_error_issues_blocks_with_tier_2_comment_after_budget_cap_limit(
+    MockGH, config, state_dir
+):
+    """With max_budget_cap_retries=1 and one prior budget-cap failure, the next
+    cycle marks the issue ai-blocked (NOT bumping to ai-ready). Tier-2 comment
+    must reference the snapshot ref and the approve-to-continue path."""
+    config["guardrails"]["max_budget_cap_retries"] = 1
+    mock_gh = MockGH.return_value
+    mock_issue = _mock_issue(42, "[v0.1] Bug", "Body")
+    mock_issue["status"] = "ai-error"
+    mock_gh.fetch_issues_by_status.side_effect = (
+        lambda s: [mock_issue] if s == "ai-error" else []
+    )
+    # Below max_retry_cycles (3) but at max_budget_cap_retries (1)
+    mock_gh.get_attempt_count.return_value = 1
+    mock_gh.get_attempt_failure_history.return_value = [
+        {"attempt": 1, "kind": "budget-cap", "reason": "hit cap",
+         "snapshot_ref": "ai/issue-42-attempt-1",
+         "wip_ref": "ai/issue-42-attempt-1-wip"},
+    ]
+
+    orch = Orchestrator(config, state_dir=state_dir)
+    orch._retry_error_issues()
+
+    # Status moved to ai-blocked, NOT ai-ready
+    update_calls = mock_gh.update_status.call_args_list
+    assert any(call.args[1] == config["statuses"]["blocked"] for call in update_calls)
+    assert not any(call.args[1] == config["statuses"]["ready"] for call in update_calls)
+    # Tier-2 comment references the snapshot ref + the approval path
+    posted_bodies = [c.args[2] for c in mock_gh.add_comment.call_args_list]
+    body = "\n".join(posted_bodies)
+    assert "Budget-cap retries exhausted" in body
+    assert "ai/issue-42-attempt-1" in body
+    assert "ai-ready" in body  # tells the user how to approve continuation
+
+
+@patch("orchestrator.GitHubClient")
+def test_retry_error_issues_allows_first_budget_cap_failure_to_retry(
+    MockGH, config, state_dir
+):
+    """A single budget-cap failure with max_budget_cap_retries=1 still gets one
+    auto-resume — the issue moves back to ai-ready, not blocked. This is the
+    tier-1 behavior: silent retry with the resume-from-WIP preamble."""
+    config["guardrails"]["max_budget_cap_retries"] = 1
+    mock_gh = MockGH.return_value
+    mock_issue = _mock_issue(42, "[v0.1] Bug", "Body")
+    mock_issue["status"] = "ai-error"
+    mock_gh.fetch_issues_by_status.side_effect = (
+        lambda s: [mock_issue] if s == "ai-error" else []
+    )
+    mock_gh.get_attempt_count.return_value = 1
+    # No prior budget-cap failure yet on this issue (history is empty or non-budget-cap kind)
+    mock_gh.get_attempt_failure_history.return_value = []
+
+    orch = Orchestrator(config, state_dir=state_dir)
+    orch._retry_error_issues()
+
+    update_calls = mock_gh.update_status.call_args_list
+    assert any(call.args[1] == config["statuses"]["ready"] for call in update_calls)
+    assert not any(call.args[1] == config["statuses"]["blocked"] for call in update_calls)
+
+
+@patch("orchestrator.GitHubClient")
+def test_retry_error_issues_only_counts_budget_cap_kind_toward_tier2_limit(
+    MockGH, config, state_dir
+):
+    """A no-pr failure followed by a budget-cap failure should NOT trip the
+    tier-2 block (only one budget-cap so far). The orchestrator must distinguish
+    failure kinds when applying the per-kind retry limit."""
+    config["guardrails"]["max_budget_cap_retries"] = 2
+    mock_gh = MockGH.return_value
+    mock_issue = _mock_issue(42, "[v0.1] Bug", "Body")
+    mock_issue["status"] = "ai-error"
+    mock_gh.fetch_issues_by_status.side_effect = (
+        lambda s: [mock_issue] if s == "ai-error" else []
+    )
+    mock_gh.get_attempt_count.return_value = 2
+    mock_gh.get_attempt_failure_history.return_value = [
+        {"attempt": 1, "kind": "no-pr", "reason": "agent gave up"},
+        {"attempt": 2, "kind": "budget-cap", "reason": "hit cap",
+         "snapshot_ref": "ai/issue-42-attempt-2"},
+    ]
+
+    orch = Orchestrator(config, state_dir=state_dir)
+    orch._retry_error_issues()
+
+    update_calls = mock_gh.update_status.call_args_list
+    # Should retry — only 1 budget-cap, limit is 2
+    assert any(call.args[1] == config["statuses"]["ready"] for call in update_calls)
+    assert not any(call.args[1] == config["statuses"]["blocked"] for call in update_calls)

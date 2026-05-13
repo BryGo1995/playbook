@@ -175,13 +175,32 @@ class Orchestrator:
 
         # For coding agents, verify a PR was actually created before advancing
         if agent["type"] == "coding":
-            from prior_attempt import serialize_failure_comment
+            from prior_attempt import KIND_BUDGET_CAP, serialize_failure_comment
+            from agent_result import detect_budget_cap_in_log
 
             pr_branch = f"ai/issue-{issue_number}"
             pr_number = self.gh.find_pr_for_branch(repo, pr_branch)
             if pr_number is None:
                 logger.warning(f"Coding agent exited without creating PR for {issue}")
                 attempt = agent["attempt"]
+
+                # Classify the failure: budget-cap (agent killed by USD limit
+                # mid-work) vs no-pr (agent gave up cleanly without committing).
+                # Tiered retry policy in _retry_error_issues branches on kind.
+                hit_budget_cap = detect_budget_cap_in_log(agent.get("log_path"))
+                if hit_budget_cap:
+                    kind = KIND_BUDGET_CAP
+                    reason = (
+                        f"Coding agent hit per-attempt USD budget cap before "
+                        f"pushing a PR on branch {pr_branch}"
+                    )
+                    slack_msg = "Coding agent hit budget cap without creating a PR"
+                else:
+                    kind = "no-pr"
+                    reason = (
+                        f"Coding agent completed but no PR found on branch {pr_branch}"
+                    )
+                    slack_msg = "Coding agent exited without creating a PR"
 
                 snapshot_ref = None
                 wip_ref = None
@@ -201,8 +220,8 @@ class Orchestrator:
                 else:
                     body = serialize_failure_comment(
                         attempt=attempt,
-                        kind="no-pr",
-                        reason=f"Coding agent completed but no PR found on branch {pr_branch}",
+                        kind=kind,
+                        reason=reason,
                         snapshot_ref=snapshot_ref,
                         wip_ref=wip_ref,
                         log_path=self.state.logs_dir,
@@ -212,7 +231,7 @@ class Orchestrator:
 
                 if project_item_id:
                     self.gh.update_status(project_item_id, self.statuses["error"])
-                self.slack.notify_error(issue, "Coding agent exited without creating a PR")
+                self.slack.notify_error(issue, slack_msg)
                 self.state.remove_agent(pid)
                 return
 
@@ -294,18 +313,61 @@ class Orchestrator:
                 self.slack.notify_error(issue_key, f"Merge failed: {e}")
 
     def _retry_error_issues(self):
-        """Move ai-error issues back to ai-ready for retry (respects max_retry_cycles)."""
+        """Move ai-error issues back to ai-ready for retry (respects max_retry_cycles).
+
+        Tiered policy for budget-cap failures: once `max_budget_cap_retries`
+        budget-cap failures have occurred on an issue, stop auto-retrying and
+        mark ai-blocked with a tier-2 comment that asks the user to approve
+        further work. User approval = manually moving the issue back to
+        ai-ready (or deleting the failure comments per the orchestrator's
+        existing manual-reset flow).
+        """
+        from prior_attempt import KIND_BUDGET_CAP
+
         issues = self.gh.fetch_issues_by_status(self.statuses["error"])
         max_retries = self.config["guardrails"]["max_retry_cycles"]
+        max_budget_cap_retries = self.config["guardrails"].get("max_budget_cap_retries", 1)
+
         for issue in issues:
             issue_key = f"{issue['repo']}#{issue['number']}"
             attempt_count = self.gh.get_attempt_count(issue["repo"], issue["number"])
+            history = self.gh.get_attempt_failure_history(issue["repo"], issue["number"])
+            budget_cap_count = sum(1 for h in history if h.get("kind") == KIND_BUDGET_CAP)
+
             if attempt_count >= max_retries:
                 logger.info(f"Error issue {issue_key} already at max retries, marking blocked")
                 self.gh.update_status(issue["project_item_id"], self.statuses["blocked"])
                 self.gh.add_comment(issue["repo"], issue["number"],
                     f"[agent-orchestrator] Max retry cycles ({max_retries}) reached. Marking blocked.")
                 self.slack.notify_max_retries(issue_key, max_retries)
+            elif budget_cap_count >= max_budget_cap_retries:
+                logger.info(
+                    f"Error issue {issue_key} has {budget_cap_count} budget-cap "
+                    f"failures (limit {max_budget_cap_retries}), marking blocked"
+                )
+                latest_budget_cap = max(
+                    (h for h in history if h.get("kind") == KIND_BUDGET_CAP),
+                    key=lambda h: h.get("attempt", 0),
+                )
+                snapshot_ref = latest_budget_cap.get("snapshot_ref")
+                snapshot_line = (
+                    f"Latest snapshot: `{snapshot_ref}`" if snapshot_ref
+                    else "No snapshot available (snapshot push failed on the last attempt)."
+                )
+                self.gh.update_status(issue["project_item_id"], self.statuses["blocked"])
+                self.gh.add_comment(issue["repo"], issue["number"],
+                    f"[agent-orchestrator] **Budget-cap retries exhausted** "
+                    f"({budget_cap_count}/{max_budget_cap_retries}).\n\n"
+                    f"This issue has hit the per-attempt USD budget cap "
+                    f"{budget_cap_count} time(s) without producing a mergeable PR. "
+                    f"The agent's work-in-progress is preserved on the snapshot ref "
+                    f"so further attempts can resume rather than restart.\n\n"
+                    f"{snapshot_line}\n\n"
+                    f"**To approve continuation:** move this issue back to "
+                    f"`{self.statuses['ready']}` (the orchestrator will auto-resume "
+                    f"from the snapshot). To stop work entirely, leave at "
+                    f"`{self.statuses['blocked']}` or close the issue.")
+                self.slack.notify_blocked(issue_key, "budget-cap retries exhausted")
             else:
                 logger.info(f"Retrying error issue {issue_key} (attempt {attempt_count + 1}/{max_retries})")
                 self.gh.update_status(issue["project_item_id"], self.statuses["ready"])
@@ -626,6 +688,7 @@ class Orchestrator:
             timeout_minutes=timeout,
             attempt=attempt,
             project_item_id=issue["project_item_id"],
+            log_path=log_path,
         )
 
     def _dispatch_testing(self, issue: dict):
