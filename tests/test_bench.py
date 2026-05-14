@@ -348,3 +348,34 @@ def test_fetch_version_map_returns_none_when_config_lacks_project():
     from bench import fetch_version_map
     m = fetch_version_map({})
     assert m is None
+
+
+def test_render_stdout_contains_both_section_headers():
+    from bench import render_stdout
+    by_version = [{
+        "version": "v0.14", "issues": 2, "attempts": 3, "first_pass_rate": 0.5,
+        "budget_caps": 1, "total_cost_usd": 7.0, "mean_cost_per_issue": 3.5,
+    }]
+    by_issue = [{
+        "issue_number": 1, "attempts": 1, "budget_caps": 0,
+        "models_used": {"coding": "claude-sonnet-4-6", "testing": "claude-haiku-4-5",
+                        "review": "claude-opus-4-7"},
+        "total_cost_usd": 1.0, "final_outcome": "success",
+    }]
+    out = render_stdout(by_version, by_issue)
+    assert "=== By version ===" in out
+    assert "=== By issue ===" in out
+    assert "v0.14" in out
+    assert "claude-sonnet-4-6" in out
+
+
+def test_render_stdout_no_version_table_when_empty():
+    from bench import render_stdout
+    by_issue = [{
+        "issue_number": 1, "attempts": 1, "budget_caps": 0,
+        "models_used": {"coding": "m", "testing": None, "review": None},
+        "total_cost_usd": 1.0, "final_outcome": "success",
+    }]
+    out = render_stdout([], by_issue)
+    assert "=== By version ===" not in out
+    assert "=== By issue ===" in out

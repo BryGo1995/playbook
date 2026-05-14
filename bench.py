@@ -279,3 +279,50 @@ def aggregate_by_version(
             "mean_cost_per_issue": (total_cost / issues) if issues else 0.0,
         })
     return out
+
+
+def _format_pct(x: float) -> str:
+    return f"{x*100:.0f}%"
+
+
+def _format_usd(x: float) -> str:
+    return f"${x:.2f}"
+
+
+def render_stdout(by_version: list[dict], by_issue: list[dict]) -> str:
+    """Render the two-table default output.
+
+    Empty input lists are skipped — when version lookup fails the version
+    table is absent rather than empty.
+    """
+    parts: list[str] = []
+
+    if by_version:
+        parts.append("=== By version ===")
+        header = f"{'version':<10} {'issues':>6} {'attempts':>8} {'first-pass':>10} {'budget-caps':>11} {'total $':>9} {'mean $/issue':>13}"
+        parts.append(header)
+        for r in by_version:
+            parts.append(
+                f"{r['version']:<10} {r['issues']:>6} {r['attempts']:>8} "
+                f"{_format_pct(r['first_pass_rate']):>10} {r['budget_caps']:>11} "
+                f"{_format_usd(r['total_cost_usd']):>9} {_format_usd(r['mean_cost_per_issue']):>13}"
+            )
+        parts.append("")
+
+    if by_issue:
+        parts.append("=== By issue ===")
+        header = f"{'issue':>6} {'coding model':<22} {'testing model':<22} {'review model':<22} {'attempts':>8} {'outcome':<22} {'cost':>8}"
+        parts.append(header)
+        for r in by_issue:
+            mu = r["models_used"]
+            parts.append(
+                f"#{r['issue_number']:<5} "
+                f"{(mu.get('coding') or '—'):<22} "
+                f"{(mu.get('testing') or '—'):<22} "
+                f"{(mu.get('review') or '—'):<22} "
+                f"{r['attempts']:>8} "
+                f"{r['final_outcome']:<22} "
+                f"{_format_usd(r['total_cost_usd']):>8}"
+            )
+
+    return "\n".join(parts) + "\n"
