@@ -80,3 +80,15 @@ def test_default_base_dir_is_cwd_playbook(tmp_path, monkeypatch):
     expected = os.path.join(str(tmp_path), ".playbook")
     assert sm.base_dir == expected
     assert os.path.isdir(os.path.join(expected, "logs"))
+
+
+def test_log_path_includes_agent_type(state_dir):
+    sm = StateManager(state_dir)
+    p_coding = sm.log_path("owner/repo", 42, "coding")
+    p_testing = sm.log_path("owner/repo", 42, "testing")
+    p_review = sm.log_path("owner/repo", 42, "review")
+    assert "owner-repo-42-coding-" in os.path.basename(p_coding)
+    assert "owner-repo-42-testing-" in os.path.basename(p_testing)
+    assert "owner-repo-42-review-" in os.path.basename(p_review)
+    # Filename pattern: <safe_repo>-<issue>-<role>-<YYYYMMDDTHHMMSS>.json
+    assert p_coding.endswith(".json")

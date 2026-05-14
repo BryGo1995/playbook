@@ -675,7 +675,7 @@ class Orchestrator:
             project_addendum=_load_project_addendum("coding"),
             model=self.config.get("models", {}).get("coding"),
         )
-        log_path = self.state.log_path(issue["repo"], issue["number"])
+        log_path = self.state.log_path(issue["repo"], issue["number"], "coding")
         log_file = open(log_path, "w")
         cwd = None
         proc = subprocess.Popen(cmd, stdout=log_file, stderr=subprocess.STDOUT, cwd=cwd)
@@ -706,7 +706,7 @@ class Orchestrator:
             project_addendum=_load_project_addendum("testing"),
             model=self.config.get("models", {}).get("testing"),
         )
-        log_path = self.state.log_path(issue["repo"], issue["number"])
+        log_path = self.state.log_path(issue["repo"], issue["number"], "testing")
         log_file = open(log_path, "w")
         cwd = None  # Orchestrator runs from within the target repo
         proc = subprocess.Popen(cmd, stdout=log_file, stderr=subprocess.STDOUT, cwd=cwd)
@@ -735,7 +735,7 @@ class Orchestrator:
             project_addendum=_load_project_addendum("review"),
             model=self.config.get("models", {}).get("review"),
         )
-        log_path = self.state.log_path(issue["repo"], issue["number"])
+        log_path = self.state.log_path(issue["repo"], issue["number"], "review")
         log_file = open(log_path, "w")
         cwd = None  # Orchestrator runs from within the target repo
         proc = subprocess.Popen(cmd, stdout=log_file, stderr=subprocess.STDOUT, cwd=cwd)

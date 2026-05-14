@@ -64,7 +64,7 @@ class StateManager:
     def is_issue_active(self, issue: str) -> bool:
         return any(a["issue"] == issue for a in self.agents)
 
-    def log_path(self, repo: str, issue_number: int) -> str:
-        timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S")
+    def log_path(self, repo: str, issue_number: int, agent_type: str) -> str:
         safe_repo = repo.replace("/", "-")
-        return os.path.join(self.logs_dir, f"{safe_repo}-{issue_number}-{timestamp}.json")
+        timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S")
+        return os.path.join(self.logs_dir, f"{safe_repo}-{issue_number}-{agent_type}-{timestamp}.json")
