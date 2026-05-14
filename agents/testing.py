@@ -39,6 +39,7 @@ class TestingAgent:
         pr_branch: str,
         max_budget_usd: float = 0.50,
         project_addendum: str = "",
+        model: str | None = None,
     ) -> list[str]:
         prompt = self.build_prompt(
             issue_title, issue_body, issue_number, repo, pr_branch,
@@ -49,4 +50,5 @@ class TestingAgent:
             allowed_tools=ALLOWED_TOOLS,
             disallowed_tools=DISALLOWED_TOOLS,
             max_budget_usd=max_budget_usd,
+            model=model,
         )
