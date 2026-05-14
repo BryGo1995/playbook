@@ -326,3 +326,8 @@ def render_stdout(by_version: list[dict], by_issue: list[dict]) -> str:
             )
 
     return "\n".join(parts) + "\n"
+
+
+def render_json(by_version: list[dict], by_issue: list[dict]) -> str:
+    """Render a single JSON document with both tables."""
+    return json.dumps({"by_version": by_version, "by_issue": by_issue}, indent=2)

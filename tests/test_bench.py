@@ -379,3 +379,22 @@ def test_render_stdout_no_version_table_when_empty():
     out = render_stdout([], by_issue)
     assert "=== By version ===" not in out
     assert "=== By issue ===" in out
+
+
+def test_render_json_roundtrips():
+    from bench import render_json
+    by_version = [{
+        "version": "v0.14", "issues": 1, "attempts": 1, "first_pass_rate": 1.0,
+        "budget_caps": 0, "total_cost_usd": 1.0, "mean_cost_per_issue": 1.0,
+    }]
+    by_issue = [{
+        "issue_number": 1, "attempts": 1, "budget_caps": 0,
+        "models_used": {"coding": "m", "testing": None, "review": None},
+        "total_cost_usd": 1.0, "final_outcome": "success",
+    }]
+    out = render_json(by_version, by_issue)
+    parsed = json.loads(out)
+    assert parsed["by_version"][0]["version"] == "v0.14"
+    assert parsed["by_issue"][0]["issue_number"] == 1
+    assert parsed["by_issue"][0]["models_used"]["coding"] == "m"
+    assert parsed["by_issue"][0]["models_used"]["testing"] is None
