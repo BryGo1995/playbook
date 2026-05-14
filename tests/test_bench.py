@@ -92,3 +92,60 @@ def test_extract_log_row_non_numeric_tokens_tolerated(tmp_path):
     assert row["output_tokens"] == 0
     assert row["turns"] == 0
     assert row["cost_usd"] == 0.0
+
+
+def test_infer_role_from_new_filename(logs_dir):
+    from bench import extract_log_row
+    dest = logs_dir / "owner-repo-7-testing-20260514T060000.json"
+    _copy_fixture("testing_success.json", dest)
+    row = extract_log_row(str(dest))
+    # Even though the heuristic would say "testing" anyway, filename wins.
+    assert row["agent_role"] == "testing"
+
+
+def test_infer_role_heuristic_coding_from_legacy_filename(logs_dir):
+    """Legacy filename with Edit/Write usage → coding."""
+    from bench import extract_log_row
+    dest = logs_dir / "owner-repo-7-20260514T060000.json"
+    _copy_fixture("legacy_coding.json", dest)
+    row = extract_log_row(str(dest))
+    assert row["agent_role"] == "coding"
+
+
+def test_infer_role_heuristic_testing_from_legacy_filename(tmp_path):
+    """Legacy filename with only Read/Bash usage → testing."""
+    from bench import extract_log_row
+    p = tmp_path / "owner-repo-7-20260514T060000.json"
+    p.write_text(
+        '{"type":"system","subtype":"init","model":"claude-haiku-4-5"}\n'
+        '{"type":"assistant","message":{"model":"x","content":[{"type":"tool_use","name":"Read","id":"t1","input":{}}],"usage":{}}}\n'
+        '{"type":"assistant","message":{"model":"x","content":[{"type":"tool_use","name":"Bash","id":"t2","input":{}}],"usage":{}}}\n'
+        '{"type":"result","subtype":"success","num_turns":2,"total_cost_usd":0.1}\n'
+    )
+    row = extract_log_row(str(p))
+    assert row["agent_role"] == "testing"
+
+
+def test_infer_role_heuristic_review_from_legacy_filename(tmp_path):
+    """Legacy filename with github MCP tool usage → review."""
+    from bench import extract_log_row
+    p = tmp_path / "owner-repo-7-20260514T060000.json"
+    p.write_text(
+        '{"type":"system","subtype":"init","model":"claude-opus-4-7"}\n'
+        '{"type":"assistant","message":{"model":"x","content":[{"type":"tool_use","name":"mcp__github__pull_request_read","id":"t1","input":{}}],"usage":{}}}\n'
+        '{"type":"result","subtype":"success","num_turns":1,"total_cost_usd":0.3}\n'
+    )
+    row = extract_log_row(str(p))
+    assert row["agent_role"] == "review"
+
+
+def test_infer_role_unknown_when_no_signal(tmp_path):
+    """Legacy filename with no tool usage signal → unknown."""
+    from bench import extract_log_row
+    p = tmp_path / "owner-repo-7-20260514T060000.json"
+    p.write_text(
+        '{"type":"system","subtype":"init","model":"claude-sonnet-4-6"}\n'
+        '{"type":"result","subtype":"success","num_turns":1,"total_cost_usd":0.05}\n'
+    )
+    row = extract_log_row(str(p))
+    assert row["agent_role"] == "unknown"

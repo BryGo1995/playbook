@@ -35,6 +35,22 @@ def _parse_filename(path: str) -> dict | None:
     return None
 
 
+def _infer_role(tools_used: set[str]) -> str:
+    """Heuristic ordering for legacy-filename logs:
+       1. any mcp__github__pull_request_* → review
+       2. any Edit or Write → coding
+       3. only Read/Bash/Grep/Glob → testing
+       4. else unknown
+    """
+    if any(t.startswith("mcp__github__pull_request_") for t in tools_used):
+        return "review"
+    if "Edit" in tools_used or "Write" in tools_used:
+        return "coding"
+    if tools_used and tools_used.issubset({"Read", "Bash", "Grep", "Glob"}):
+        return "testing"
+    return "unknown"
+
+
 def extract_log_row(log_path: str) -> dict | None:
     """Parse one agent NDJSON log into a row dict.
 
@@ -110,7 +126,7 @@ def extract_log_row(log_path: str) -> dict | None:
         "log_path": log_path,
         "filename": os.path.basename(log_path),
         "issue_number": fname_info["issue_number"],
-        "agent_role": fname_info["role_from_filename"] or "unknown",  # heuristic patched in Task 3
+        "agent_role": fname_info["role_from_filename"] or _infer_role(tools_used),
         "model": model,
         "cost_usd": cost_usd,
         "turns": turns,
