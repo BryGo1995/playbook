@@ -211,3 +211,46 @@ def test_snapshot_on_failure_default(tmp_path):
 
     cfg = load_config(project_dir=str(project_dir), defaults_path=str(defaults_dir / "defaults.yaml"))
     assert cfg["guardrails"]["snapshot_on_failure"] is True
+
+
+def test_models_defaults_loaded(tmp_path):
+    """defaults.yaml exposes per-role pinned model IDs."""
+    import shutil
+    defaults_dir = tmp_path / "playbook"
+    defaults_dir.mkdir()
+    real_defaults = os.path.join(os.path.dirname(os.path.dirname(__file__)), "defaults.yaml")
+    shutil.copy(real_defaults, defaults_dir / "defaults.yaml")
+
+    project_dir = tmp_path / "my-project"
+    project_dir.mkdir()
+    (project_dir / "playbook.yaml").write_text("repo: owner/my-project\n")
+
+    cfg = load_config(project_dir=str(project_dir), defaults_path=str(defaults_dir / "defaults.yaml"))
+    assert cfg["models"]["coding"] == "claude-sonnet-4-6"
+    assert cfg["models"]["testing"] == "claude-haiku-4-5"
+    assert cfg["models"]["review"] == "claude-opus-4-7"
+
+
+def test_models_project_overrides_defaults(tmp_path):
+    """Project playbook.yaml can override a subset of model IDs."""
+    defaults_dir = tmp_path / "playbook"
+    defaults_dir.mkdir()
+    (defaults_dir / "defaults.yaml").write_text("""
+models:
+  coding: claude-sonnet-4-6
+  testing: claude-haiku-4-5
+  review: claude-opus-4-7
+""")
+
+    project_dir = tmp_path / "my-project"
+    project_dir.mkdir()
+    (project_dir / "playbook.yaml").write_text("""
+repo: owner/my-project
+models:
+  coding: claude-opus-4-7
+""")
+
+    cfg = load_config(project_dir=str(project_dir), defaults_path=str(defaults_dir / "defaults.yaml"))
+    assert cfg["models"]["coding"] == "claude-opus-4-7"   # overridden
+    assert cfg["models"]["testing"] == "claude-haiku-4-5"  # inherited
+    assert cfg["models"]["review"] == "claude-opus-4-7"    # inherited

@@ -29,6 +29,14 @@ versioning:
   bootstrap_max_budget_usd: 5.0
   coding_max_budget_usd: 5.0
 
+# Per-role model selection. Pinned full model IDs (not aliases) so benchmark
+# baselines stay stable when Anthropic releases new minors. Override any
+# subset in a project's playbook.yaml.
+models:
+  coding: claude-sonnet-4-6
+  testing: claude-haiku-4-5
+  review: claude-opus-4-7
+
 statuses:
   backlog: "Backlog"
   ready: "ai-ready"
