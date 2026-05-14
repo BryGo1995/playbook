@@ -187,3 +187,59 @@ def aggregate_by_issue(rows: list[dict]) -> list[dict]:
             "final_outcome": final_outcome,
         })
     return out
+
+
+def _version_label(v: tuple[int, int] | None) -> str:
+    if v is None:
+        return "(no version)"
+    if v == (0, 0):
+        return "bootstrap"
+    return f"v{v[0]}.{v[1]}"
+
+
+def aggregate_by_version(
+    issue_rows: list[dict],
+    version_map: dict[int, tuple[int, int]],
+) -> list[dict]:
+    """Group per-issue rows by version label.
+
+    `version_map`: issue_number → (major, minor); issues absent from the
+    map are bucketed under "(no version)".
+
+    `first_pass_rate` excludes issues whose `final_outcome` is not a
+    resolvable terminal state (e.g. "(no-coding-log)" — still in flight).
+    """
+    by_version: dict[tuple[int, int] | None, list[dict]] = {}
+    for r in issue_rows:
+        v = version_map.get(r["issue_number"])
+        by_version.setdefault(v, []).append(r)
+
+    out: list[dict] = []
+    sort_key = lambda v: (v is None, v if v is not None else (0, 0))
+    for v in sorted(by_version.keys(), key=sort_key):
+        bucket = by_version[v]
+        issues = len(bucket)
+        attempts = sum(r["attempts"] for r in bucket)
+        budget_caps = sum(r["budget_caps"] for r in bucket)
+        total_cost = sum(float(r["total_cost_usd"]) for r in bucket)
+
+        # first_pass_rate: denominator excludes in-flight issues
+        resolved = [r for r in bucket if r["final_outcome"] not in ("(no-coding-log)",)]
+        if resolved:
+            first_pass = sum(
+                1 for r in resolved
+                if r["attempts"] == 1 and r["final_outcome"] == "success"
+            ) / len(resolved)
+        else:
+            first_pass = 0.0
+
+        out.append({
+            "version": _version_label(v),
+            "issues": issues,
+            "attempts": attempts,
+            "first_pass_rate": first_pass,
+            "budget_caps": budget_caps,
+            "total_cost_usd": total_cost,
+            "mean_cost_per_issue": (total_cost / issues) if issues else 0.0,
+        })
+    return out

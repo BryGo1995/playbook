@@ -228,3 +228,81 @@ def test_aggregate_by_issue_multiple_issues_sorted():
     ]
     out = aggregate_by_issue(rows)
     assert [r["issue_number"] for r in out] == [3, 7]
+
+
+def test_aggregate_by_version_basic():
+    from bench import aggregate_by_version
+    issue_rows = [
+        {"issue_number": 1, "attempts": 1, "budget_caps": 0,
+         "models_used": {}, "total_cost_usd": 1.0, "final_outcome": "success"},
+        {"issue_number": 2, "attempts": 2, "budget_caps": 1,
+         "models_used": {}, "total_cost_usd": 6.0, "final_outcome": "success"},
+        {"issue_number": 3, "attempts": 1, "budget_caps": 0,
+         "models_used": {}, "total_cost_usd": 2.0, "final_outcome": "success"},
+    ]
+    version_map = {1: (0, 14), 2: (0, 14), 3: (0, 15)}
+    out = aggregate_by_version(issue_rows, version_map)
+    by_v = {r["version"]: r for r in out}
+    v14 = by_v["v0.14"]
+    assert v14["issues"] == 2
+    assert v14["attempts"] == 3
+    assert v14["budget_caps"] == 1
+    assert v14["first_pass_rate"] == pytest.approx(0.5)  # 1 of 2 was attempts==1+success
+    assert v14["total_cost_usd"] == pytest.approx(7.0)
+    assert v14["mean_cost_per_issue"] == pytest.approx(3.5)
+    v15 = by_v["v0.15"]
+    assert v15["first_pass_rate"] == 1.0
+
+
+def test_aggregate_by_version_bootstrap_label():
+    from bench import aggregate_by_version
+    issue_rows = [
+        {"issue_number": 1, "attempts": 1, "budget_caps": 0,
+         "models_used": {}, "total_cost_usd": 1.0, "final_outcome": "success"},
+    ]
+    version_map = {1: (0, 0)}
+    out = aggregate_by_version(issue_rows, version_map)
+    assert out[0]["version"] == "bootstrap"
+
+
+def test_aggregate_by_version_unversioned_bucket():
+    from bench import aggregate_by_version
+    issue_rows = [
+        {"issue_number": 1, "attempts": 1, "budget_caps": 0,
+         "models_used": {}, "total_cost_usd": 1.0, "final_outcome": "success"},
+        {"issue_number": 2, "attempts": 1, "budget_caps": 0,
+         "models_used": {}, "total_cost_usd": 2.0, "final_outcome": "success"},
+    ]
+    version_map = {1: (0, 14)}  # issue 2 missing → goes to (no version) bucket
+    out = aggregate_by_version(issue_rows, version_map)
+    by_v = {r["version"]: r for r in out}
+    assert "(no version)" in by_v
+    assert by_v["(no version)"]["issues"] == 1
+
+
+def test_aggregate_by_version_first_pass_rate_excludes_in_flight():
+    """An issue with attempts=1 but final_outcome != 'success' is excluded from denominator."""
+    from bench import aggregate_by_version
+    issue_rows = [
+        {"issue_number": 1, "attempts": 1, "budget_caps": 0,
+         "models_used": {}, "total_cost_usd": 1.0, "final_outcome": "success"},
+        {"issue_number": 2, "attempts": 1, "budget_caps": 0,
+         "models_used": {}, "total_cost_usd": 1.0, "final_outcome": "(no-coding-log)"},
+    ]
+    version_map = {1: (0, 14), 2: (0, 14)}
+    out = aggregate_by_version(issue_rows, version_map)
+    # Only issue 1 has a resolvable final_outcome → denominator = 1, numerator = 1
+    assert out[0]["first_pass_rate"] == 1.0
+
+
+def test_aggregate_by_version_sorted():
+    from bench import aggregate_by_version
+    issue_rows = [
+        {"issue_number": 1, "attempts": 1, "budget_caps": 0,
+         "models_used": {}, "total_cost_usd": 1.0, "final_outcome": "success"},
+        {"issue_number": 2, "attempts": 1, "budget_caps": 0,
+         "models_used": {}, "total_cost_usd": 1.0, "final_outcome": "success"},
+    ]
+    version_map = {1: (0, 15), 2: (0, 14)}
+    out = aggregate_by_version(issue_rows, version_map)
+    assert [r["version"] for r in out] == ["v0.14", "v0.15"]
