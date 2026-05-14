@@ -673,6 +673,7 @@ class Orchestrator:
             attempt=attempt,
             prior_attempt_context=prior_attempt_context,
             project_addendum=_load_project_addendum("coding"),
+            model=self.config.get("models", {}).get("coding"),
         )
         log_path = self.state.log_path(issue["repo"], issue["number"])
         log_file = open(log_path, "w")
@@ -703,6 +704,7 @@ class Orchestrator:
             repo=issue["repo"],
             pr_branch=pr_branch,
             project_addendum=_load_project_addendum("testing"),
+            model=self.config.get("models", {}).get("testing"),
         )
         log_path = self.state.log_path(issue["repo"], issue["number"])
         log_file = open(log_path, "w")
@@ -731,6 +733,7 @@ class Orchestrator:
             repo=issue["repo"],
             pr_number=pr_number,
             project_addendum=_load_project_addendum("review"),
+            model=self.config.get("models", {}).get("review"),
         )
         log_path = self.state.log_path(issue["repo"], issue["number"])
         log_file = open(log_path, "w")

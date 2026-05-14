@@ -1085,3 +1085,141 @@ def test_retry_error_issues_only_counts_budget_cap_kind_toward_tier2_limit(
     # Should retry — only 1 budget-cap, limit is 2
     assert any(call.args[1] == config["statuses"]["ready"] for call in update_calls)
     assert not any(call.args[1] == config["statuses"]["blocked"] for call in update_calls)
+
+
+@patch("orchestrator.subprocess.Popen")
+@patch("orchestrator.GitHubClient")
+def test_dispatch_coding_uses_models_config(MockGH, MockPopen, config, state_dir):
+    """Coding dispatch passes models.coding from config to build_command."""
+    config["models"] = {
+        "coding": "claude-sonnet-4-6",
+        "testing": "claude-haiku-4-5",
+        "review": "claude-opus-4-7",
+    }
+    mock_gh = MockGH.return_value
+    mock_issue = _mock_issue(42, "[v0.1] Fix bug", "Body\n## Acceptance Criteria\n- [ ] works")
+    mock_gh.fetch_issues_by_status.side_effect = lambda s: [mock_issue] if s == "ai-ready" else []
+    mock_gh.get_attempt_count.return_value = 0
+
+    mock_proc = MagicMock()
+    mock_proc.pid = 99999
+    MockPopen.return_value = mock_proc
+
+    orch = Orchestrator.__new__(Orchestrator)
+    orch.config = config
+    orch.statuses = config["statuses"]
+    orch.gh = mock_gh
+    orch.state = __import__("state").StateManager(state_dir)
+    orch.slack = __import__("notifications.slack", fromlist=["SlackNotifier"]).SlackNotifier(None)
+    orch.coding_agent = __import__("agents.coding", fromlist=["CodingAgent"]).CodingAgent()
+    orch.testing_agent = __import__("agents.testing", fromlist=["TestingAgent"]).TestingAgent()
+    orch.review_agent = __import__("agents.review", fromlist=["ReviewAgent"]).ReviewAgent()
+
+    orch.run()
+
+    MockPopen.assert_called_once()
+    argv = MockPopen.call_args[0][0]
+    assert "--model" in argv
+    assert argv[argv.index("--model") + 1] == "claude-sonnet-4-6"
+
+
+@patch("orchestrator.subprocess.Popen")
+@patch("orchestrator.GitHubClient")
+def test_dispatch_testing_uses_models_config(MockGH, MockPopen, config, state_dir):
+    """Testing dispatch passes models.testing from config."""
+    config["models"] = {
+        "coding": "claude-sonnet-4-6",
+        "testing": "claude-haiku-4-5",
+        "review": "claude-opus-4-7",
+    }
+    mock_gh = MockGH.return_value
+    mock_issue = _mock_issue(42, "[v0.1] Fix bug", "Body")
+    mock_gh.fetch_issues_by_status.side_effect = lambda s: [mock_issue] if s == "ai-testing" else []
+
+    mock_proc = MagicMock()
+    mock_proc.pid = 99999
+    MockPopen.return_value = mock_proc
+
+    orch = Orchestrator.__new__(Orchestrator)
+    orch.config = config
+    orch.statuses = config["statuses"]
+    orch.gh = mock_gh
+    orch.state = __import__("state").StateManager(state_dir)
+    orch.slack = __import__("notifications.slack", fromlist=["SlackNotifier"]).SlackNotifier(None)
+    orch.coding_agent = __import__("agents.coding", fromlist=["CodingAgent"]).CodingAgent()
+    orch.testing_agent = __import__("agents.testing", fromlist=["TestingAgent"]).TestingAgent()
+    orch.review_agent = __import__("agents.review", fromlist=["ReviewAgent"]).ReviewAgent()
+
+    orch.run()
+
+    MockPopen.assert_called_once()
+    argv = MockPopen.call_args[0][0]
+    assert "--model" in argv
+    assert argv[argv.index("--model") + 1] == "claude-haiku-4-5"
+
+
+@patch("orchestrator.subprocess.Popen")
+@patch("orchestrator.GitHubClient")
+def test_dispatch_review_uses_models_config(MockGH, MockPopen, config, state_dir):
+    """Review dispatch passes models.review from config."""
+    config["models"] = {
+        "coding": "claude-sonnet-4-6",
+        "testing": "claude-haiku-4-5",
+        "review": "claude-opus-4-7",
+    }
+    mock_gh = MockGH.return_value
+    mock_issue = _mock_issue(42, "[v0.1] Fix bug", "Body")
+    mock_gh.fetch_issues_by_status.side_effect = lambda s: [mock_issue] if s == "ai-review" else []
+
+    mock_proc = MagicMock()
+    mock_proc.pid = 99999
+    MockPopen.return_value = mock_proc
+
+    orch = Orchestrator.__new__(Orchestrator)
+    orch.config = config
+    orch.statuses = config["statuses"]
+    orch.gh = mock_gh
+    orch.state = __import__("state").StateManager(state_dir)
+    orch.slack = __import__("notifications.slack", fromlist=["SlackNotifier"]).SlackNotifier(None)
+    orch.coding_agent = __import__("agents.coding", fromlist=["CodingAgent"]).CodingAgent()
+    orch.testing_agent = __import__("agents.testing", fromlist=["TestingAgent"]).TestingAgent()
+    orch.review_agent = __import__("agents.review", fromlist=["ReviewAgent"]).ReviewAgent()
+
+    orch.run()
+
+    MockPopen.assert_called_once()
+    argv = MockPopen.call_args[0][0]
+    assert "--model" in argv
+    assert argv[argv.index("--model") + 1] == "claude-opus-4-7"
+
+
+@patch("orchestrator.subprocess.Popen")
+@patch("orchestrator.GitHubClient")
+def test_dispatch_omits_model_when_block_missing(MockGH, MockPopen, config, state_dir):
+    """Missing 'models' block in config -> no --model flag, no exception."""
+    # NOTE: config fixture deliberately omits 'models'
+    assert "models" not in config
+    mock_gh = MockGH.return_value
+    mock_issue = _mock_issue(42, "[v0.1] Fix bug", "Body\n## Acceptance Criteria\n- [ ] works")
+    mock_gh.fetch_issues_by_status.side_effect = lambda s: [mock_issue] if s == "ai-ready" else []
+    mock_gh.get_attempt_count.return_value = 0
+
+    mock_proc = MagicMock()
+    mock_proc.pid = 99999
+    MockPopen.return_value = mock_proc
+
+    orch = Orchestrator.__new__(Orchestrator)
+    orch.config = config
+    orch.statuses = config["statuses"]
+    orch.gh = mock_gh
+    orch.state = __import__("state").StateManager(state_dir)
+    orch.slack = __import__("notifications.slack", fromlist=["SlackNotifier"]).SlackNotifier(None)
+    orch.coding_agent = __import__("agents.coding", fromlist=["CodingAgent"]).CodingAgent()
+    orch.testing_agent = __import__("agents.testing", fromlist=["TestingAgent"]).TestingAgent()
+    orch.review_agent = __import__("agents.review", fromlist=["ReviewAgent"]).ReviewAgent()
+
+    orch.run()
+
+    MockPopen.assert_called_once()
+    argv = MockPopen.call_args[0][0]
+    assert "--model" not in argv
