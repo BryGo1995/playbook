@@ -1223,3 +1223,33 @@ def test_dispatch_omits_model_when_block_missing(MockGH, MockPopen, config, stat
     MockPopen.assert_called_once()
     argv = MockPopen.call_args[0][0]
     assert "--model" not in argv
+
+
+@patch("orchestrator.subprocess.Popen")
+@patch("orchestrator.GitHubClient")
+def test_dispatch_testing_omits_model_when_role_key_missing(MockGH, MockPopen, config, state_dir):
+    """A partial models block (coding set, testing absent) -> testing dispatch emits no --model."""
+    config["models"] = {"coding": "claude-sonnet-4-6"}  # testing and review absent
+    mock_gh = MockGH.return_value
+    mock_issue = _mock_issue(42, "[v0.1] Fix bug", "Body")
+    mock_gh.fetch_issues_by_status.side_effect = lambda s: [mock_issue] if s == "ai-testing" else []
+
+    mock_proc = MagicMock()
+    mock_proc.pid = 99999
+    MockPopen.return_value = mock_proc
+
+    orch = Orchestrator.__new__(Orchestrator)
+    orch.config = config
+    orch.statuses = config["statuses"]
+    orch.gh = mock_gh
+    orch.state = __import__("state").StateManager(state_dir)
+    orch.slack = __import__("notifications.slack", fromlist=["SlackNotifier"]).SlackNotifier(None)
+    orch.coding_agent = __import__("agents.coding", fromlist=["CodingAgent"]).CodingAgent()
+    orch.testing_agent = __import__("agents.testing", fromlist=["TestingAgent"]).TestingAgent()
+    orch.review_agent = __import__("agents.review", fromlist=["ReviewAgent"]).ReviewAgent()
+
+    orch.run()
+
+    MockPopen.assert_called_once()
+    argv = MockPopen.call_args[0][0]
+    assert "--model" not in argv

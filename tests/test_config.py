@@ -1,5 +1,6 @@
 # tests/test_config.py
 import os
+import shutil
 import pytest
 from config import load_config
 
@@ -215,7 +216,6 @@ def test_snapshot_on_failure_default(tmp_path):
 
 def test_models_defaults_loaded(tmp_path):
     """defaults.yaml exposes per-role pinned model IDs."""
-    import shutil
     defaults_dir = tmp_path / "playbook"
     defaults_dir.mkdir()
     real_defaults = os.path.join(os.path.dirname(os.path.dirname(__file__)), "defaults.yaml")
