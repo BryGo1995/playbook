@@ -306,3 +306,45 @@ def test_aggregate_by_version_sorted():
     version_map = {1: (0, 15), 2: (0, 14)}
     out = aggregate_by_version(issue_rows, version_map)
     assert [r["version"] for r in out] == ["v0.14", "v0.15"]
+
+
+from unittest.mock import patch, MagicMock
+
+
+def test_fetch_version_map_returns_map_on_success():
+    from bench import fetch_version_map
+    config = {
+        "project": {"owner": "owner", "number": 1, "status_field_id": "PVTSSF_test"},
+    }
+    fake_issues = [
+        {"number": 261, "title": "[v0.14] Rename CoverageTracker"},
+        {"number": 269, "title": "[v0.15] Surface-flush paintball splat"},
+        {"number": 999, "title": "Untagged issue"},  # no version → skipped
+    ]
+    with patch("bench.GitHubClient") as MockGH:
+        mock = MockGH.return_value
+        mock.fetch_all_project_issues.return_value = fake_issues
+        m = fetch_version_map(config)
+    assert m == {261: (0, 14), 269: (0, 15)}
+
+
+def test_fetch_version_map_returns_none_on_exception(capsys):
+    """A GitHub failure prints a warning to stderr and returns None."""
+    from bench import fetch_version_map
+    config = {
+        "project": {"owner": "owner", "number": 1, "status_field_id": "PVTSSF_test"},
+    }
+    with patch("bench.GitHubClient") as MockGH:
+        MockGH.return_value.fetch_all_project_issues.side_effect = RuntimeError("offline")
+        m = fetch_version_map(config)
+    assert m is None
+    captured = capsys.readouterr()
+    assert "warning" in captured.err.lower()
+    assert "offline" in captured.err.lower()
+
+
+def test_fetch_version_map_returns_none_when_config_lacks_project():
+    """If playbook.yaml has no `project` block, can't query GitHub."""
+    from bench import fetch_version_map
+    m = fetch_version_map({})
+    assert m is None

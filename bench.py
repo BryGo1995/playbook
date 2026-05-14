@@ -7,6 +7,10 @@ tables to stdout/JSON/Markdown.
 import json
 import os
 import re
+import sys
+
+from github_client import GitHubClient
+from versioning import parse_version
 
 # Filename schemas:
 #  - new:    <safe_repo>-<issue>-<role>-<YYYYMMDDTHHMMSS>.json
@@ -186,6 +190,38 @@ def aggregate_by_issue(rows: list[dict]) -> list[dict]:
             "total_cost_usd": total_cost,
             "final_outcome": final_outcome,
         })
+    return out
+
+
+def fetch_version_map(config: dict) -> dict[int, tuple[int, int]] | None:
+    """Look up issue_number → version tuple via the GitHub Projects API.
+
+    Returns None (with a stderr warning) on any failure: missing project
+    config block, missing token, network error, or unexpected payload.
+    Callers degrade to issue-only output when the result is None.
+    """
+    project = config.get("project")
+    if not isinstance(project, dict) or "owner" not in project or "number" not in project or "status_field_id" not in project:
+        print("[bench] warning: config has no `project` block — version grouping disabled", file=sys.stderr)
+        return None
+
+    try:
+        gh = GitHubClient()
+        gh.load_project_metadata(
+            owner=project["owner"],
+            project_number=project["number"],
+            status_field_id=project["status_field_id"],
+        )
+        issues = gh.fetch_all_project_issues()
+    except Exception as e:  # noqa: BLE001 — broad catch is intentional for graceful degradation
+        print(f"[bench] warning: GitHub lookup failed — {e}", file=sys.stderr)
+        return None
+
+    out: dict[int, tuple[int, int]] = {}
+    for issue in issues:
+        v = parse_version(issue.get("title", "") or "")
+        if v is not None:
+            out[int(issue["number"])] = v
     return out
 
 
