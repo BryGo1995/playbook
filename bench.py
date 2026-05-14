@@ -4,12 +4,15 @@ Reads each agent NDJSON log, extracts a row dict (cost, turns, outcome,
 model, role, tokens), aggregates per-issue and per-version, and renders
 tables to stdout/JSON/Markdown.
 """
+import argparse
+import glob
 import json
 import os
 import re
 import sys
 from datetime import datetime, timezone
 
+from config import load_config
 from github_client import GitHubClient
 from versioning import parse_version
 
@@ -371,3 +374,95 @@ def render_markdown(by_version: list[dict], by_issue: list[dict], path: str) -> 
 
     with open(path, "w", encoding="utf-8") as f:
         f.write("\n".join(lines))
+
+
+def _filter_by_since(by_version: list[dict], since: tuple[int, int] | None) -> list[dict]:
+    if since is None:
+        return by_version
+    out = []
+    for r in by_version:
+        v = r["version"]
+        if v == "(no version)":
+            continue
+        if v == "bootstrap":
+            tup = (0, 0)
+        else:
+            m = re.match(r"^v(\d+)\.(\d+)$", v)
+            if not m:
+                continue
+            tup = (int(m.group(1)), int(m.group(2)))
+        if tup >= since:
+            out.append(r)
+    return out
+
+
+def _parse_since(s: str) -> tuple[int, int]:
+    m = re.match(r"^v(\d+)\.(\d+)$", s)
+    if not m:
+        raise argparse.ArgumentTypeError(f"--since must look like 'v0.14', got: {s!r}")
+    return (int(m.group(1)), int(m.group(2)))
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(
+        prog="bench",
+        description="Aggregate .playbook/logs/*.json into cost/quality tables.",
+    )
+    parser.add_argument("--json", action="store_true", help="Emit JSON to stdout.")
+    parser.add_argument("--markdown", metavar="PATH", help="Write markdown report to PATH.")
+    parser.add_argument("--since", type=_parse_since, default=None,
+                        help="Filter to versions >= vX.Y (e.g. v0.14).")
+    parser.add_argument("--by-issue", action="store_true",
+                        help="Suppress the per-version table.")
+    parser.add_argument("--by-version", action="store_true",
+                        help="Suppress the per-issue table.")
+    args = parser.parse_args()
+
+    if args.by_issue and args.by_version:
+        print("[bench] error: --by-issue and --by-version are mutually exclusive",
+              file=sys.stderr)
+        return 2
+
+    # 1. Discover logs
+    log_paths = sorted(glob.glob(os.path.join(".playbook", "logs", "*.json")))
+
+    # 2. Extract rows
+    rows: list[dict] = []
+    for p in log_paths:
+        row = extract_log_row(p)
+        if row is not None:
+            rows.append(row)
+
+    # 3. Per-issue aggregation
+    by_issue = aggregate_by_issue(rows)
+
+    # 4. Per-version aggregation (best-effort GitHub lookup)
+    try:
+        config = load_config()
+    except FileNotFoundError:
+        config = {}
+    version_map = fetch_version_map(config) if config else None
+    if version_map is not None:
+        by_version = aggregate_by_version(by_issue, version_map)
+        by_version = _filter_by_since(by_version, args.since)
+    else:
+        by_version = []
+
+    # 5. Apply table suppression flags
+    if args.by_issue:
+        by_version = []
+    if args.by_version:
+        by_issue = []
+
+    # 6. Render
+    if args.json:
+        print(render_json(by_version, by_issue))
+    elif args.markdown:
+        render_markdown(by_version, by_issue, args.markdown)
+    else:
+        print(render_stdout(by_version, by_issue), end="")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

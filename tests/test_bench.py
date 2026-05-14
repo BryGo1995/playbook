@@ -421,3 +421,101 @@ def test_render_markdown_writes_both_tables_and_header(tmp_path):
     assert "| v0.14 |" in text
     assert "| #1 |" in text
     assert "claude-sonnet-4-6" in text
+
+
+def test_main_smoke_default(tmp_path, monkeypatch, capsys):
+    """Run main() in a project dir with one log; default invocation prints the issue table."""
+    from bench import main as bench_main
+
+    # Project dir with playbook.yaml + .playbook/logs/<fixture>
+    project = tmp_path / "proj"
+    (project / ".playbook" / "logs").mkdir(parents=True)
+    (project / "playbook.yaml").write_text("repo: owner/repo\n")
+    _copy_fixture("coding_success.json",
+                  project / ".playbook" / "logs" / "owner-repo-42-coding-20260514T024012.json")
+
+    monkeypatch.chdir(project)
+    # No 'project' block in playbook.yaml → fetch_version_map returns None → issue-only table.
+    monkeypatch.setattr("sys.argv", ["bench"])
+    rc = bench_main()
+    out = capsys.readouterr().out
+    assert "=== By issue ===" in out
+    assert "#42" in out
+    assert rc == 0
+
+
+def test_main_by_issue_and_by_version_mutually_exclusive(monkeypatch, capsys):
+    from bench import main as bench_main
+    monkeypatch.setattr("sys.argv", ["bench", "--by-issue", "--by-version"])
+    rc = bench_main()
+    assert rc == 2
+    err = capsys.readouterr().err
+    assert "mutually exclusive" in err.lower()
+
+
+def test_main_since_filter(tmp_path, monkeypatch, capsys):
+    """`--since v0.14` excludes issues from v0.13."""
+    from bench import main as bench_main
+    project = tmp_path / "proj"
+    (project / ".playbook" / "logs").mkdir(parents=True)
+    (project / "playbook.yaml").write_text("repo: owner/repo\n")
+    _copy_fixture("coding_success.json",
+                  project / ".playbook" / "logs" / "owner-repo-261-coding-20260514T024012.json")
+    _copy_fixture("coding_success.json",
+                  project / ".playbook" / "logs" / "owner-repo-269-coding-20260514T030000.json")
+    monkeypatch.chdir(project)
+
+    # Mock GitHub so we get a real version map
+    with patch("bench.GitHubClient") as MockGH:
+        MockGH.return_value.fetch_all_project_issues.return_value = [
+            {"number": 261, "title": "[v0.13] x"},
+            {"number": 269, "title": "[v0.15] y"},
+        ]
+        monkeypatch.setattr(
+            "sys.argv",
+            ["bench", "--since", "v0.14"],
+        )
+        # Also stub the project block check
+        import yaml
+        (project / "playbook.yaml").write_text(yaml.safe_dump({
+            "repo": "owner/repo",
+            "project": {"owner": "owner", "number": 1, "status_field_id": "x"},
+        }))
+        rc = bench_main()
+    out = capsys.readouterr().out
+    assert "v0.15" in out
+    assert "v0.13" not in out
+    assert rc == 0
+
+
+def test_main_json_output(tmp_path, monkeypatch, capsys):
+    from bench import main as bench_main
+    project = tmp_path / "proj"
+    (project / ".playbook" / "logs").mkdir(parents=True)
+    (project / "playbook.yaml").write_text("repo: owner/repo\n")
+    _copy_fixture("coding_success.json",
+                  project / ".playbook" / "logs" / "owner-repo-42-coding-20260514T024012.json")
+    monkeypatch.chdir(project)
+    monkeypatch.setattr("sys.argv", ["bench", "--json"])
+    rc = bench_main()
+    out = capsys.readouterr().out
+    parsed = json.loads(out)
+    assert "by_issue" in parsed and "by_version" in parsed
+    assert rc == 0
+
+
+def test_main_markdown_output(tmp_path, monkeypatch, capsys):
+    from bench import main as bench_main
+    project = tmp_path / "proj"
+    (project / ".playbook" / "logs").mkdir(parents=True)
+    (project / "playbook.yaml").write_text("repo: owner/repo\n")
+    _copy_fixture("coding_success.json",
+                  project / ".playbook" / "logs" / "owner-repo-42-coding-20260514T024012.json")
+    md_out = tmp_path / "bench.md"
+    monkeypatch.chdir(project)
+    monkeypatch.setattr("sys.argv", ["bench", "--markdown", str(md_out)])
+    rc = bench_main()
+    assert rc == 0
+    text = md_out.read_text()
+    assert "# Playbook bench" in text
+    assert "## By issue" in text
