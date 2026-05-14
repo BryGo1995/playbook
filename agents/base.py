@@ -40,6 +40,7 @@ def build_claude_command(
     output_format: str = "stream-json",
     max_budget_usd: float | None = None,
     disallowed_tools: list[str] | None = None,
+    model: str | None = None,
 ) -> list[str]:
     """Build the claude -p command line."""
     cmd = [
@@ -55,5 +56,7 @@ def build_claude_command(
         cmd.extend(["--disallowedTools", ",".join(disallowed_tools)])
     if max_budget_usd is not None:
         cmd.extend(["--max-budget-usd", str(max_budget_usd)])
+    if model is not None:
+        cmd.extend(["--model", model])
     cmd.append(prompt)
     return cmd

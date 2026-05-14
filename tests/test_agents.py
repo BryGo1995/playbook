@@ -444,3 +444,37 @@ def test_review_prompt_placeholders_match_expected():
         "pr_number", "project_addendum",
     }
     assert placeholders == expected
+
+
+def test_build_claude_command_includes_model_when_provided():
+    cmd = build_claude_command(
+        prompt="x",
+        allowed_tools=["Bash"],
+        max_budget_usd=1.0,
+        model="claude-sonnet-4-6",
+    )
+    assert "--model" in cmd
+    assert cmd[cmd.index("--model") + 1] == "claude-sonnet-4-6"
+
+
+def test_build_claude_command_omits_model_when_none():
+    cmd = build_claude_command(
+        prompt="x",
+        allowed_tools=["Bash"],
+        max_budget_usd=1.0,
+        model=None,
+    )
+    assert "--model" not in cmd
+
+
+def test_build_claude_command_model_appears_after_max_budget():
+    """Argv ordering: --max-budget-usd <val> --model <id> ... <prompt>."""
+    cmd = build_claude_command(
+        prompt="x",
+        allowed_tools=["Bash"],
+        max_budget_usd=1.0,
+        model="claude-opus-4-7",
+    )
+    budget_idx = cmd.index("--max-budget-usd")
+    model_idx = cmd.index("--model")
+    assert model_idx > budget_idx
