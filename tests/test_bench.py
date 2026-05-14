@@ -398,3 +398,26 @@ def test_render_json_roundtrips():
     assert parsed["by_issue"][0]["issue_number"] == 1
     assert parsed["by_issue"][0]["models_used"]["coding"] == "m"
     assert parsed["by_issue"][0]["models_used"]["testing"] is None
+
+
+def test_render_markdown_writes_both_tables_and_header(tmp_path):
+    from bench import render_markdown
+    by_version = [{
+        "version": "v0.14", "issues": 1, "attempts": 1, "first_pass_rate": 1.0,
+        "budget_caps": 0, "total_cost_usd": 1.0, "mean_cost_per_issue": 1.0,
+    }]
+    by_issue = [{
+        "issue_number": 1, "attempts": 1, "budget_caps": 0,
+        "models_used": {"coding": "claude-sonnet-4-6", "testing": "claude-haiku-4-5",
+                        "review": "claude-opus-4-7"},
+        "total_cost_usd": 1.0, "final_outcome": "success",
+    }]
+    out_path = tmp_path / "report.md"
+    render_markdown(by_version, by_issue, str(out_path))
+    text = out_path.read_text()
+    assert text.startswith("# Playbook bench")
+    assert "## By version" in text
+    assert "## By issue" in text
+    assert "| v0.14 |" in text
+    assert "| #1 |" in text
+    assert "claude-sonnet-4-6" in text

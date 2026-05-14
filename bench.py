@@ -8,6 +8,7 @@ import json
 import os
 import re
 import sys
+from datetime import datetime, timezone
 
 from github_client import GitHubClient
 from versioning import parse_version
@@ -331,3 +332,42 @@ def render_stdout(by_version: list[dict], by_issue: list[dict]) -> str:
 def render_json(by_version: list[dict], by_issue: list[dict]) -> str:
     """Render a single JSON document with both tables."""
     return json.dumps({"by_version": by_version, "by_issue": by_issue}, indent=2)
+
+
+def render_markdown(by_version: list[dict], by_issue: list[dict], path: str) -> None:
+    """Write a GitHub-flavored Markdown report to `path`. Overwrites if present."""
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    lines: list[str] = [f"# Playbook bench — generated {today}", ""]
+
+    if by_version:
+        lines.append("## By version")
+        lines.append("")
+        lines.append("| version | issues | attempts | first-pass | budget-caps | total | mean/issue |")
+        lines.append("|---|---|---|---|---|---|---|")
+        for r in by_version:
+            lines.append(
+                f"| {r['version']} | {r['issues']} | {r['attempts']} | "
+                f"{_format_pct(r['first_pass_rate'])} | {r['budget_caps']} | "
+                f"{_format_usd(r['total_cost_usd'])} | {_format_usd(r['mean_cost_per_issue'])} |"
+            )
+        lines.append("")
+
+    if by_issue:
+        lines.append("## By issue")
+        lines.append("")
+        lines.append("| issue | coding | testing | review | attempts | outcome | cost |")
+        lines.append("|---|---|---|---|---|---|---|")
+        for r in by_issue:
+            mu = r["models_used"]
+            lines.append(
+                f"| #{r['issue_number']} | "
+                f"{mu.get('coding') or '—'} | "
+                f"{mu.get('testing') or '—'} | "
+                f"{mu.get('review') or '—'} | "
+                f"{r['attempts']} | {r['final_outcome']} | "
+                f"{_format_usd(r['total_cost_usd'])} |"
+            )
+        lines.append("")
+
+    with open(path, "w", encoding="utf-8") as f:
+        f.write("\n".join(lines))
