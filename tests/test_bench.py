@@ -71,3 +71,24 @@ def test_extract_log_row_unreadable_file_returns_none(tmp_path):
     """A path that doesn't exist returns None rather than raising."""
     from bench import extract_log_row
     assert extract_log_row(str(tmp_path / "does-not-exist.json")) is None
+
+
+def test_extract_log_row_non_numeric_tokens_tolerated(tmp_path):
+    """Valid JSON with string values where numbers are expected -> tolerated, not crash."""
+    from bench import extract_log_row
+    p = tmp_path / "owner-repo-7-coding-20260514T060000.json"
+    p.write_text(
+        '{"type":"system","subtype":"init","model":"claude-sonnet-4-6"}\n'
+        # Usage with string tokens
+        '{"type":"assistant","message":{"model":"x","content":[],"usage":{"cache_read_input_tokens":"NaN","output_tokens":"oops"}}}\n'
+        # Result with string numerics
+        '{"type":"result","subtype":"success","num_turns":"bad","total_cost_usd":"also bad"}\n'
+    )
+    row = extract_log_row(str(p))
+    assert row is not None
+    assert row["outcome"] == "success"
+    # Bad values should have been swallowed and left at 0
+    assert row["cache_read_tokens"] == 0
+    assert row["output_tokens"] == 0
+    assert row["turns"] == 0
+    assert row["cost_usd"] == 0.0

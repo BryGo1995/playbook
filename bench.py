@@ -77,8 +77,11 @@ def extract_log_row(log_path: str) -> dict | None:
                 if msg:
                     usage = msg.get("usage")
                     if isinstance(usage, dict):
-                        cache_read_tokens += int(usage.get("cache_read_input_tokens", 0) or 0)
-                        output_tokens += int(usage.get("output_tokens", 0) or 0)
+                        try:
+                            cache_read_tokens += int(usage.get("cache_read_input_tokens", 0) or 0)
+                            output_tokens += int(usage.get("output_tokens", 0) or 0)
+                        except (ValueError, TypeError):
+                            pass  # tolerate non-numeric token values in malformed records
                     for blk in msg.get("content", []) or []:
                         if isinstance(blk, dict) and blk.get("type") == "tool_use":
                             name = blk.get("name", "")
@@ -89,8 +92,14 @@ def extract_log_row(log_path: str) -> dict | None:
                 if rec.get("type") == "result":
                     seen_result = True
                     outcome = rec.get("subtype") or "(unknown)"
-                    turns = int(rec.get("num_turns") or 0)
-                    cost_usd = float(rec.get("total_cost_usd") or 0.0)
+                    try:
+                        turns = int(rec.get("num_turns") or 0)
+                    except (ValueError, TypeError):
+                        turns = 0
+                    try:
+                        cost_usd = float(rec.get("total_cost_usd") or 0.0)
+                    except (ValueError, TypeError):
+                        cost_usd = 0.0
     except OSError:
         return None
 
