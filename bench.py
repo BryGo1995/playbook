@@ -255,8 +255,9 @@ def aggregate_by_version(
         by_version.setdefault(v, []).append(r)
 
     out: list[dict] = []
-    sort_key = lambda v: (v is None, v if v is not None else (0, 0))
-    for v in sorted(by_version.keys(), key=sort_key):
+    def _sort_key(v: tuple[int, int] | None) -> tuple[bool, tuple[int, int]]:
+        return (v is None, v if v is not None else (0, 0))
+    for v in sorted(by_version.keys(), key=_sort_key):
         bucket = by_version[v]
         issues = len(bucket)
         attempts = sum(r["attempts"] for r in bucket)
@@ -411,7 +412,8 @@ def main() -> int:
     parser.add_argument("--json", action="store_true", help="Emit JSON to stdout.")
     parser.add_argument("--markdown", metavar="PATH", help="Write markdown report to PATH.")
     parser.add_argument("--since", type=_parse_since, default=None,
-                        help="Filter to versions >= vX.Y (e.g. v0.14).")
+                        help="Filter the version table to versions >= vX.Y "
+                             "(e.g. v0.14). The issue table is not filtered.")
     parser.add_argument("--by-issue", action="store_true",
                         help="Suppress the per-version table.")
     parser.add_argument("--by-version", action="store_true",

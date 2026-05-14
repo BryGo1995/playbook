@@ -308,10 +308,8 @@ def test_aggregate_by_version_sorted():
     assert [r["version"] for r in out] == ["v0.14", "v0.15"]
 
 
-from unittest.mock import patch, MagicMock
-
-
 def test_fetch_version_map_returns_map_on_success():
+    from unittest.mock import patch
     from bench import fetch_version_map
     config = {
         "project": {"owner": "owner", "number": 1, "status_field_id": "PVTSSF_test"},
@@ -331,6 +329,7 @@ def test_fetch_version_map_returns_map_on_success():
 def test_fetch_version_map_returns_none_on_exception(capsys):
     """A GitHub failure prints a warning to stderr and returns None."""
     from bench import fetch_version_map
+    from unittest.mock import patch
     config = {
         "project": {"owner": "owner", "number": 1, "status_field_id": "PVTSSF_test"},
     }
@@ -456,6 +455,7 @@ def test_main_by_issue_and_by_version_mutually_exclusive(monkeypatch, capsys):
 def test_main_since_filter(tmp_path, monkeypatch, capsys):
     """`--since v0.14` excludes issues from v0.13."""
     from bench import main as bench_main
+    from unittest.mock import patch
     project = tmp_path / "proj"
     (project / ".playbook" / "logs").mkdir(parents=True)
     (project / "playbook.yaml").write_text("repo: owner/repo\n")
