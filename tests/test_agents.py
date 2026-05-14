@@ -478,3 +478,22 @@ def test_build_claude_command_model_appears_after_max_budget():
     budget_idx = cmd.index("--max-budget-usd")
     model_idx = cmd.index("--model")
     assert model_idx > budget_idx
+
+
+def test_coding_agent_passes_model_to_build_claude_command():
+    cmd = CodingAgent().build_command(
+        issue_title="t",
+        issue_body="b",
+        issue_number=1,
+        repo="o/r",
+        model="claude-sonnet-4-6",
+    )
+    assert "--model" in cmd
+    assert cmd[cmd.index("--model") + 1] == "claude-sonnet-4-6"
+
+
+def test_coding_agent_omits_model_when_not_provided():
+    cmd = CodingAgent().build_command(
+        issue_title="t", issue_body="b", issue_number=1, repo="o/r",
+    )
+    assert "--model" not in cmd
