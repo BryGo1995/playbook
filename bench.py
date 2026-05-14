@@ -137,3 +137,53 @@ def extract_log_row(log_path: str) -> dict | None:
         "attempt_index": 0,  # filled in during aggregation
         "_tools_used": tools_used,  # internal — consumed by infer_role
     }
+
+
+def aggregate_by_issue(rows: list[dict]) -> list[dict]:
+    """Group log rows by issue_number.
+
+    Side effect: assigns `attempt_index` to each input row (1-based, by
+    timestamp within the same agent_role). This makes per-attempt detail
+    available in later renderers without a second pass.
+
+    Returns a list sorted by issue_number ascending.
+    """
+    # First pass: assign attempt_index per (issue, role) sorted by timestamp
+    by_issue_role: dict[tuple[int, str], list[dict]] = {}
+    for r in rows:
+        by_issue_role.setdefault((r["issue_number"], r["agent_role"]), []).append(r)
+    for group in by_issue_role.values():
+        group.sort(key=lambda r: r["timestamp"])
+        for i, r in enumerate(group, start=1):
+            r["attempt_index"] = i
+
+    # Second pass: aggregate per issue
+    by_issue: dict[int, list[dict]] = {}
+    for r in rows:
+        by_issue.setdefault(r["issue_number"], []).append(r)
+
+    out: list[dict] = []
+    for issue_number, issue_rows in sorted(by_issue.items()):
+        coding_rows = [r for r in issue_rows if r["agent_role"] == "coding"]
+        coding_rows.sort(key=lambda r: r["timestamp"])
+        attempts = len(coding_rows)
+        budget_caps = sum(1 for r in coding_rows if r["outcome"] == "error_max_budget_usd")
+        models_used = {"coding": None, "testing": None, "review": None}
+        for role in ("coding", "testing", "review"):
+            role_rows = [r for r in issue_rows if r["agent_role"] == role]
+            if role_rows:
+                # Use the latest log's model (config could have changed mid-run)
+                role_rows.sort(key=lambda r: r["timestamp"])
+                models_used[role] = role_rows[-1]["model"]
+        total_cost = sum(float(r["cost_usd"]) for r in issue_rows)
+        final_outcome = coding_rows[-1]["outcome"] if coding_rows else "(no-coding-log)"
+
+        out.append({
+            "issue_number": issue_number,
+            "attempts": attempts,
+            "budget_caps": budget_caps,
+            "models_used": models_used,
+            "total_cost_usd": total_cost,
+            "final_outcome": final_outcome,
+        })
+    return out

@@ -149,3 +149,82 @@ def test_infer_role_unknown_when_no_signal(tmp_path):
     )
     row = extract_log_row(str(p))
     assert row["agent_role"] == "unknown"
+
+
+def test_aggregate_by_issue_single_issue_multi_attempts():
+    """Two coding attempts on same issue → attempts=2, sums correct."""
+    from bench import aggregate_by_issue
+    rows = [
+        {"issue_number": 5, "agent_role": "coding", "model": "m1",
+         "cost_usd": 1.0, "outcome": "error_max_budget_usd",
+         "timestamp": "20260514T010000", "turns": 30,
+         "cache_read_tokens": 0, "output_tokens": 0},
+        {"issue_number": 5, "agent_role": "coding", "model": "m1",
+         "cost_usd": 0.8, "outcome": "success",
+         "timestamp": "20260514T020000", "turns": 10,
+         "cache_read_tokens": 0, "output_tokens": 0},
+        {"issue_number": 5, "agent_role": "testing", "model": "m2",
+         "cost_usd": 0.05, "outcome": "success",
+         "timestamp": "20260514T021000", "turns": 1,
+         "cache_read_tokens": 0, "output_tokens": 0},
+        {"issue_number": 5, "agent_role": "review", "model": "m3",
+         "cost_usd": 0.3, "outcome": "success",
+         "timestamp": "20260514T022000", "turns": 1,
+         "cache_read_tokens": 0, "output_tokens": 0},
+    ]
+    out = aggregate_by_issue(rows)
+    assert len(out) == 1
+    r = out[0]
+    assert r["issue_number"] == 5
+    assert r["attempts"] == 2
+    assert r["budget_caps"] == 1
+    assert r["models_used"] == {"coding": "m1", "testing": "m2", "review": "m3"}
+    assert r["total_cost_usd"] == pytest.approx(2.15)
+    assert r["final_outcome"] == "success"  # latest coding-role timestamp
+
+
+def test_aggregate_by_issue_models_used_none_when_no_log_for_role():
+    from bench import aggregate_by_issue
+    rows = [
+        {"issue_number": 5, "agent_role": "coding", "model": "m1",
+         "cost_usd": 1.0, "outcome": "success",
+         "timestamp": "20260514T010000", "turns": 1,
+         "cache_read_tokens": 0, "output_tokens": 0},
+    ]
+    out = aggregate_by_issue(rows)
+    assert out[0]["models_used"] == {"coding": "m1", "testing": None, "review": None}
+
+
+def test_aggregate_by_issue_assigns_attempt_index_within_role():
+    """Multiple coding logs on the same issue → attempt_index 1,2,... by timestamp."""
+    from bench import aggregate_by_issue
+    rows = [
+        {"issue_number": 5, "agent_role": "coding", "model": "m1",
+         "cost_usd": 1.0, "outcome": "error_max_budget_usd",
+         "timestamp": "20260514T020000", "turns": 30,
+         "cache_read_tokens": 0, "output_tokens": 0},
+        {"issue_number": 5, "agent_role": "coding", "model": "m1",
+         "cost_usd": 0.8, "outcome": "success",
+         "timestamp": "20260514T010000", "turns": 10,
+         "cache_read_tokens": 0, "output_tokens": 0},
+    ]
+    aggregate_by_issue(rows)
+    # After aggregation the input rows should be tagged with attempt_index by timestamp.
+    timestamps_in_order = sorted([(r["timestamp"], r["attempt_index"]) for r in rows])
+    # Earliest timestamp = attempt 1, next = attempt 2
+    assert timestamps_in_order[0][1] == 1
+    assert timestamps_in_order[1][1] == 2
+
+
+def test_aggregate_by_issue_multiple_issues_sorted():
+    from bench import aggregate_by_issue
+    rows = [
+        {"issue_number": 7, "agent_role": "coding", "model": "m",
+         "cost_usd": 0.5, "outcome": "success",
+         "timestamp": "t1", "turns": 1, "cache_read_tokens": 0, "output_tokens": 0},
+        {"issue_number": 3, "agent_role": "coding", "model": "m",
+         "cost_usd": 0.5, "outcome": "success",
+         "timestamp": "t1", "turns": 1, "cache_read_tokens": 0, "output_tokens": 0},
+    ]
+    out = aggregate_by_issue(rows)
+    assert [r["issue_number"] for r in out] == [3, 7]
