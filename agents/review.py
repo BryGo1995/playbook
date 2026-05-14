@@ -47,6 +47,7 @@ class ReviewAgent:
         pr_number: int,
         max_budget_usd: float = 0.50,
         project_addendum: str = "",
+        model: str | None = None,
     ) -> list[str]:
         prompt = self.build_prompt(
             issue_title, issue_body, issue_number, repo, pr_number,
@@ -57,4 +58,5 @@ class ReviewAgent:
             allowed_tools=ALLOWED_TOOLS,
             disallowed_tools=DISALLOWED_TOOLS,
             max_budget_usd=max_budget_usd,
+            model=model,
         )

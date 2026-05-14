@@ -518,3 +518,24 @@ def test_testing_agent_omits_model_when_not_provided():
         pr_branch="ai/issue-1",
     )
     assert "--model" not in cmd
+
+
+def test_review_agent_passes_model_to_build_claude_command():
+    cmd = ReviewAgent().build_command(
+        issue_title="t",
+        issue_body="b",
+        issue_number=1,
+        repo="o/r",
+        pr_number=1,
+        model="claude-opus-4-7",
+    )
+    assert "--model" in cmd
+    assert cmd[cmd.index("--model") + 1] == "claude-opus-4-7"
+
+
+def test_review_agent_omits_model_when_not_provided():
+    cmd = ReviewAgent().build_command(
+        issue_title="t", issue_body="b", issue_number=1, repo="o/r",
+        pr_number=1,
+    )
+    assert "--model" not in cmd
