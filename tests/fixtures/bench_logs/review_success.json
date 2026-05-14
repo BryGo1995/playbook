@@ -1,0 +1,3 @@
+{"type":"system","subtype":"init","cwd":"/x","session_id":"s4","tools":["Read","Bash"],"model":"claude-opus-4-7"}
+{"type":"assistant","message":{"model":"claude-opus-4-7","content":[{"type":"tool_use","name":"mcp__github__pull_request_review_write","id":"t1","input":{}}],"usage":{"input_tokens":3,"output_tokens":40,"cache_read_input_tokens":2000,"cache_creation_input_tokens":100}}}
+{"type":"result","subtype":"success","num_turns":1,"total_cost_usd":0.30}
