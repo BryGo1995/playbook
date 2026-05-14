@@ -14,6 +14,7 @@ _PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardi
 _PLUGIN_JSON = os.path.join(_PROJECT_ROOT, ".claude-plugin", "plugin.json")
 _MARKETPLACE_JSON = os.path.join(_PROJECT_ROOT, ".claude-plugin", "marketplace.json")
 _INTEGRATION_PR_TEMPLATE = os.path.join(_PROJECT_ROOT, "templates", "integration-pr-caller.yml")
+_RUN_ALL_SCRIPT = os.path.join(_PROJECT_ROOT, "run-all.sh")
 
 
 def _load_json(path: str) -> dict:
@@ -81,4 +82,20 @@ def test_integration_pr_caller_template_pins_to_plugin_version():
     expected_ref = f"v{plugin_version}"
     assert ref == expected_ref, (
         f"template ref @{ref} does not match plugin.json version (expected @{expected_ref})"
+    )
+
+
+def test_run_all_script_ships_with_empty_projects_array():
+    """run-all.sh must ship with an empty PROJECTS=() — user project paths
+    belong in ~/.config/playbook/projects.sh, never in the tracked script.
+    Pins the May-2026 distribution-cleanup so a future commit can't quietly
+    re-leak maintainer paths into the repo."""
+    with open(_RUN_ALL_SCRIPT) as f:
+        content = f.read()
+    match = re.search(r"^PROJECTS=\((.*?)\)", content, re.MULTILINE | re.DOTALL)
+    assert match is not None, "run-all.sh missing PROJECTS=(...) declaration"
+    body = match.group(1).strip()
+    assert body == "", (
+        f"run-all.sh PROJECTS=() must be empty in the distribution; found:\n{body}\n"
+        "User project paths belong in ~/.config/playbook/projects.sh."
     )
