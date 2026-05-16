@@ -1,0 +1,146 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Build bundle artifact without publishing"
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  gate:
+    uses: ./.github/workflows/ci.yml
+
+  publish:
+    needs: gate
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Resolve version and tag
+        id: vars
+        env:
+          GITHUB_REF: ${{ github.ref }}
+          EVENT_NAME: ${{ github.event_name }}
+          INPUT_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT_NAME" = "release" ]; then
+            TAG="$INPUT_TAG"
+          elif [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            TAG="${GITHUB_REF#refs/tags/}"
+          else
+            TAG=""
+          fi
+          if [ -z "$TAG" ]; then
+            echo "No tag context (workflow_dispatch dry-run). Using version from plugin.json."
+            VERSION="$(python3 -c 'import json; print(json.load(open(".claude-plugin/plugin.json"))["version"])')"
+            TAG="v${VERSION}"
+          else
+            VERSION="${TAG#v}"
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Verify tag matches plugin.json version
+        if: github.event_name != 'workflow_dispatch'
+        env:
+          TAG: ${{ steps.vars.outputs.tag }}
+          VERSION: ${{ steps.vars.outputs.version }}
+        run: |
+          set -euo pipefail
+          FILE_VERSION="$(python3 -c 'import json; print(json.load(open(".claude-plugin/plugin.json"))["version"])')"
+          if [ "$FILE_VERSION" != "$VERSION" ]; then
+            echo "::error::Tag $TAG does not match plugin.json version $FILE_VERSION."
+            echo "Did you forget to run scripts/release.sh?"
+            exit 1
+          fi
+
+      - name: Build bundle
+        env:
+          VERSION: ${{ steps.vars.outputs.version }}
+        run: |
+          set -euo pipefail
+          BUNDLE="playbook-${VERSION}.zip"
+          # Inclusion list (do NOT use exclusion-list zip flags here).
+          zip -r "$BUNDLE" \
+            .claude-plugin agents notifications skills templates docs \
+            $(ls *.py) \
+            defaults.yaml requirements.txt README.md setup.sh run-all.sh
+          ls -lh "$BUNDLE"
+          echo "BUNDLE=$BUNDLE" >> "$GITHUB_ENV"
+
+      - name: Generate release notes
+        if: github.event_name != 'workflow_dispatch'
+        env:
+          TAG: ${{ steps.vars.outputs.tag }}
+        run: |
+          set -euo pipefail
+          PREV="$(git describe --tags --abbrev=0 "${TAG}^" 2>/dev/null || true)"
+          if [ -z "$PREV" ]; then
+            RANGE="$(git rev-list --max-parents=0 HEAD)..HEAD"
+            HEADING="### Initial release"
+          else
+            RANGE="${PREV}..HEAD"
+            HEADING="### Changes since ${PREV}"
+          fi
+          {
+            echo "$HEADING"
+            echo ""
+            for prefix in feat fix chore docs refactor test ci; do
+              LINES="$(git log "$RANGE" --pretty=format:'- %s' | grep -E "^- ${prefix}(\\(|:|!)" || true)"
+              if [ -n "$LINES" ]; then
+                echo "**${prefix}**"
+                echo "$LINES"
+                echo ""
+              fi
+            done
+            OTHERS="$(git log "$RANGE" --pretty=format:'- %s' | grep -Ev '^- (feat|fix|chore|docs|refactor|test|ci)(\\(|:|!)' || true)"
+            if [ -n "$OTHERS" ]; then
+              echo "**other**"
+              echo "$OTHERS"
+            fi
+          } > release-notes.md
+          cat release-notes.md
+
+      - name: Upload artifact (dry-run mode)
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.BUNDLE }}
+          path: ${{ env.BUNDLE }}
+
+      - name: Create or update GitHub Release (idempotent)
+        if: github.event_name != 'workflow_dispatch'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.vars.outputs.tag }}
+        run: |
+          set -euo pipefail
+          DRAFT_FLAG=""
+          if [[ "$TAG" == *-rc* || "$TAG" == *-beta* ]]; then
+            DRAFT_FLAG="--draft"
+          fi
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release $TAG exists, updating assets and notes."
+            gh release upload "$TAG" "$BUNDLE" --clobber
+            gh release edit "$TAG" --notes-file release-notes.md
+          else
+            echo "Creating release $TAG."
+            gh release create "$TAG" "$BUNDLE" --title "$TAG" --notes-file release-notes.md $DRAFT_FLAG
+          fi
