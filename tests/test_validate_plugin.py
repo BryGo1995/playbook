@@ -40,3 +40,10 @@ def test_skill_missing_description_fails():
     assert result.returncode == 1
     assert "description" in result.stdout
     assert "sample/SKILL.md" in result.stdout
+
+
+def test_skill_name_mismatch_fails():
+    result = run_validator(FIXTURES / "skill_name_mismatch")
+    assert result.returncode == 1
+    assert "playbook:wrong" in result.stdout
+    assert "playbook:sample" in result.stdout
