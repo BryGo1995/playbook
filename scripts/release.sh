@@ -62,6 +62,13 @@ if git remote get-url origin >/dev/null 2>&1; then
     fi
 fi
 
+# Precondition 4: tag must not already exist locally
+if git rev-parse "$TAG" >/dev/null 2>&1; then
+    echo "ERROR: tag '$TAG' already exists locally." >&2
+    echo "If a previous push failed, run: git push origin $TAG" >&2
+    exit 1
+fi
+
 PLUGIN_JSON=".claude-plugin/plugin.json"
 MARKETPLACE_JSON=".claude-plugin/marketplace.json"
 
@@ -84,13 +91,17 @@ version, plugin_path, marketplace_path = sys.argv[1], Path(sys.argv[2]), Path(sy
 
 plugin = json.loads(plugin_path.read_text())
 plugin["version"] = version
-plugin_path.write_text(json.dumps(plugin, indent=2) + "\n")
 
 market = json.loads(marketplace_path.read_text())
+meta = market.get("metadata")
+if meta is not None and not isinstance(meta, dict):
+    sys.exit(f"ERROR: {marketplace_path}: 'metadata' must be a dict, got {type(meta).__name__}")
 market.setdefault("metadata", {})["version"] = version
 plugins = market.get("plugins") or []
 for p in plugins:
     p["version"] = version
+
+plugin_path.write_text(json.dumps(plugin, indent=2) + "\n")
 marketplace_path.write_text(json.dumps(market, indent=2) + "\n")
 PY
 
@@ -107,7 +118,11 @@ else
     if git remote get-url origin >/dev/null 2>&1; then
         echo "  - Pushing commit and tag to origin"
         git push origin main
-        git push origin "$TAG"
+        if ! git push origin "$TAG"; then
+            echo "ERROR: commit pushed but tag push failed." >&2
+            echo "Re-run: git push origin $TAG" >&2
+            exit 1
+        fi
     else
         echo "  - No origin configured, skipping push"
     fi

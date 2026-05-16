@@ -1,10 +1,6 @@
 import os
-import shutil
-import stat
 import subprocess
 from pathlib import Path
-
-import pytest
 
 SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "release.sh"
 
@@ -86,3 +82,10 @@ def test_happy_path_bumps_versions_commits_and_tags(tmp_path):
         ["git", "log", "-1", "--pretty=%s"], cwd=repo, capture_output=True, text=True, check=True
     ).stdout.strip()
     assert last_msg == "chore: release v1.0.0"
+
+
+def test_aborts_on_invalid_semver(tmp_path):
+    repo = _init_git_repo(tmp_path)
+    result = _run_script(repo, "not-a-version")
+    assert result.returncode == 2
+    assert "semver" in (result.stdout + result.stderr).lower()
