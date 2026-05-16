@@ -47,3 +47,10 @@ def test_skill_name_mismatch_fails():
     assert result.returncode == 1
     assert "playbook:wrong" in result.stdout
     assert "playbook:sample" in result.stdout
+
+
+def test_missing_agent_prompt_fails():
+    result = run_validator(FIXTURES / "missing_prompt")
+    assert result.returncode == 1
+    assert "coding.md" in result.stdout
+    assert "missing" in result.stdout
