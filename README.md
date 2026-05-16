@@ -172,6 +172,8 @@ The typical first-run order is `/playbook:scout` → `/playbook:gameplan` → wa
 python3 -m pytest tests/ -v
 ```
 
+See [docs/ci-cd.md](docs/ci-cd.md) for the CI gating and release process.
+
 ---
 
 ## Security & Trust Model
