@@ -6,14 +6,6 @@ on:
   release:
     types: [published]
   workflow_dispatch:
-    inputs:
-      dry_run:
-        description: "Build bundle artifact without publishing"
-        type: boolean
-        default: true
-
-permissions:
-  contents: write
 
 concurrency:
   group: release-${{ github.ref }}
@@ -26,6 +18,9 @@ jobs:
   publish:
     needs: gate
     runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -78,9 +73,12 @@ jobs:
           set -euo pipefail
           BUNDLE="playbook-${VERSION}.zip"
           # Inclusion list (do NOT use exclusion-list zip flags here).
+          shopt -s nullglob
+          py_files=(*.py)
+          shopt -u nullglob
           zip -r "$BUNDLE" \
             .claude-plugin agents notifications skills templates docs \
-            $(ls *.py) \
+            "${py_files[@]}" \
             defaults.yaml requirements.txt README.md setup.sh run-all.sh
           ls -lh "$BUNDLE"
           echo "BUNDLE=$BUNDLE" >> "$GITHUB_ENV"
