@@ -20,3 +20,10 @@ def test_good_fixture_passes():
     assert "✓ plugin.json" in result.stdout
     assert "✓ skills/sample/SKILL.md" in result.stdout
     assert "✓ agents/coding.py" in result.stdout
+
+
+def test_missing_plugin_json_fails():
+    result = run_validator(FIXTURES / "missing_plugin_json")
+    assert result.returncode == 1
+    assert "plugin.json" in result.stdout
+    assert "missing" in result.stdout
