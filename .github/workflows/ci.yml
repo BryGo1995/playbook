@@ -4,9 +4,45 @@ on:
   pull_request:
   push:
     branches: [main]
+  workflow_call:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.11', '3.12', '3.13']
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+
+      - name: Install dependencies
+        run: pip install -r requirements-dev.txt
+
+      - name: Lint with ruff
+        run: ruff check .
+
+      - name: Run tests with coverage
+        run: |
+          coverage run -m pytest tests/ -v
+          coverage report
+
+      - name: Audit dependencies (warn-only)
+        continue-on-error: true
+        run: pip-audit -r requirements.txt --strict
+
+  validate-plugin:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -18,11 +54,27 @@ jobs:
           cache: pip
           cache-dependency-path: requirements-dev.txt
 
-      - name: Install dependencies
-        run: pip install -r requirements-dev.txt
+      - name: Install pyyaml
+        run: pip install pyyaml
 
-      - name: Lint with ruff
-        run: ruff check .
+      - name: Validate plugin layout
+        run: python scripts/validate_plugin.py
 
-      - name: Run tests
-        run: python -m pytest tests/ -v
+  shellcheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install shellcheck
+        run: sudo apt-get update && sudo apt-get install -y shellcheck
+
+      - name: Lint shell scripts
+        run: |
+          shopt -s nullglob
+          files=(scripts/*.sh setup.sh run-all.sh)
+          if [ ${#files[@]} -eq 0 ]; then
+            echo "No shell scripts to lint."
+            exit 0
+          fi
+          shellcheck "${files[@]}"
+        shell: bash
