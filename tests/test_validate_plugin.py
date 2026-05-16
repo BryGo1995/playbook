@@ -27,3 +27,9 @@ def test_missing_plugin_json_fails():
     assert result.returncode == 1
     assert "plugin.json" in result.stdout
     assert "missing" in result.stdout
+
+
+def test_version_mismatch_fails():
+    result = run_validator(FIXTURES / "version_mismatch")
+    assert result.returncode == 1
+    assert "version mismatch" in result.stdout
