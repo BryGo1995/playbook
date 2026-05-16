@@ -17,3 +17,6 @@ def run_validator(plugin_root: Path) -> subprocess.CompletedProcess:
 def test_good_fixture_passes():
     result = run_validator(FIXTURES / "good")
     assert result.returncode == 0, f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"
+    assert "✓ plugin.json" in result.stdout
+    assert "✓ skills/sample/SKILL.md" in result.stdout
+    assert "✓ agents/coding.py" in result.stdout

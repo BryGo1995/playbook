@@ -81,9 +81,11 @@ def _check_plugin_manifests(root: Path, report: Report) -> None:
         report.fail(f"marketplace.json invalid JSON: {e}")
         return
 
-    for field_name in ("name", "version"):
-        if field_name not in plugin:
-            report.fail(f"plugin.json missing required field '{field_name}'")
+    required_missing = [f for f in ("name", "version") if f not in plugin]
+    for f in required_missing:
+        report.fail(f"plugin.json missing required field '{f}'")
+    if required_missing:
+        return
 
     plugin_version = plugin.get("version")
     market_metadata_version = marketplace.get("metadata", {}).get("version")
@@ -112,7 +114,7 @@ def _check_skills(root: Path, report: Report) -> None:
             report.fail(f"{skill_md.relative_to(root)} missing")
             continue
         text = skill_md.read_text()
-        m = re.match(r"^---\n(.*?)\n---\n", text, re.DOTALL)
+        m = re.match(r"^---\n(.*?)\n---\s*\n?", text, re.DOTALL)
         if not m:
             report.fail(f"{skill_md.relative_to(root)}: missing YAML frontmatter")
             continue
@@ -138,7 +140,9 @@ def _check_agent_prompts(root: Path, report: Report) -> None:
     agents_dir = root / "agents"
     if not agents_dir.is_dir():
         return
-    pattern = re.compile(r'os\.path\.join\(\s*os\.path\.dirname\(__file__\)\s*,\s*"prompts"\s*,\s*"([^"]+)"')
+    pattern = re.compile(
+        r'os\.path\.join\(\s*os\.path\.dirname\(__file__\)\s*,\s*["\']prompts["\']\s*,\s*["\']([^"\']+)["\']'
+    )
     for py in sorted(agents_dir.glob("*.py")):
         text = py.read_text()
         for match in pattern.finditer(text):
