@@ -33,3 +33,10 @@ def test_version_mismatch_fails():
     result = run_validator(FIXTURES / "version_mismatch")
     assert result.returncode == 1
     assert "version mismatch" in result.stdout
+
+
+def test_skill_missing_description_fails():
+    result = run_validator(FIXTURES / "bad_skill_frontmatter")
+    assert result.returncode == 1
+    assert "description" in result.stdout
+    assert "sample/SKILL.md" in result.stdout
