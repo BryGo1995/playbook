@@ -1,0 +1,6 @@
+{
+  "name": "sample",
+  "description": "Sample plugin for tests",
+  "version": "0.1.0",
+  "author": { "name": "test" }
+}

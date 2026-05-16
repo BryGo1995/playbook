@@ -1,0 +1,11 @@
+{
+  "name": "sample",
+  "owner": { "name": "test" },
+  "metadata": {
+    "description": "Sample plugin for tests",
+    "version": "0.1.0"
+  },
+  "plugins": [
+    { "name": "sample", "source": "./", "description": "Sample", "version": "0.1.0" }
+  ]
+}
